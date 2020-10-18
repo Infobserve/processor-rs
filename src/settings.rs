@@ -75,4 +75,47 @@ impl fmt::Display for NonPositiveWorkers {
     }
 }
 impl Error for NonPositiveWorkers {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_returns_the_default_for_missing_file() {
+        assert_eq!(Settings::from_file("non-existent.yml").unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn it_returns_the_default_for_empty_cfg() {
+        let yml = "";
+        assert_eq!(Settings::from_string(yml).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn returns_correct_processor_value() {
+        let yml = r#"
+        workers:
+            processors: 2
+        "#;
+        assert_eq!(Settings::from_string(yml).unwrap(), Settings { num_processors: 2, num_feeders: DEFAULT_NUM_FEEDERS });
+    }
+
+    #[test]
+    fn returns_correct_feeder_value() {
+        let yml = r#"
+        workers:
+            feeders: 5
+        "#;
+        assert_eq!(Settings::from_string(yml).unwrap(), Settings { num_processors: DEFAULT_NUM_PROCESSORS, num_feeders: 5 })
+    }
+
+    #[test]
+    #[should_panic]
+    fn blows_up_for_non_positive_workers() {
+        let  yml = r#"
+        workers:
+            feeders: -1
+        "#;
+        Settings::from_string(yml).unwrap();
+    }
 }

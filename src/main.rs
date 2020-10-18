@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    println!("Is this the best processor or what?");
 }

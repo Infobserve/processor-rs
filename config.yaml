@@ -1,0 +1,4 @@
+---
+workers:
+  processors: 1
+  feeders: 1

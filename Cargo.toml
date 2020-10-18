@@ -1,9 +1,10 @@
 [package]
 name = "processor-rs"
 version = "0.1.0"
-authors = ["Kostas Kolivas <kwstaskolivas@gmail.com>"]
+authors = ["Kostas Kolivas <kwstaskolivas@gmail.com>", "Mikts <mikts94@gmail.com>", "George Anastasiadis <dkspreegeorge@hotmail.com>", "Ougatron <xrisostomos.kinalidis@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+yaml-rust = "0.4.4"

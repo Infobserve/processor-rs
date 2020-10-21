@@ -9,3 +9,12 @@ impl fmt::Display for NonPositiveWorkersError {
     }
 }
 impl Error for NonPositiveWorkersError {}
+
+#[derive(Debug, Clone)]
+pub struct NoYaraRulesError;
+impl fmt::Display for NoYaraRulesError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "No yara rules could be loaded")
+    }
+}
+impl Error for NoYaraRulesError {}

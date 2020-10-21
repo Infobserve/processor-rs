@@ -1,0 +1,5 @@
+---
+workers:
+  processors: num_processors # The number of threads the processor will use
+  feeders: num_feeders # The number of feeder threads that will provide data to the processors
+yara_rule_dir: path_to_dir # The root of the directory which contains all `.yar` files

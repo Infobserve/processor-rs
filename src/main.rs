@@ -1,4 +1,5 @@
 mod settings;
+mod event;
 use settings::Settings;
 
 fn main() {

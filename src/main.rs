@@ -1,9 +1,16 @@
 mod settings;
 mod event;
+mod errors;
+mod utils;
+
 use settings::Settings;
 
 fn main() {
-    let s = Settings::from_file("config.yaml").unwrap();
+    let _s = Settings::from_file("config.yaml").unwrap();
 
-    println!("Read settings:\nNumber of processors: {} & Number of feeders: {}", s.num_processors(), s.num_feeders());
+    let v: Vec<String> = utils::rec_get_files_by_ext("src", "rs");
+
+    for f in v.into_iter() {
+        println!("{}", f);
+    }
 }

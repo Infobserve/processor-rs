@@ -9,4 +9,5 @@ edition = "2018"
 [dependencies]
 yaml-rust = "0.4.4"
 walkdir = "2"
-log = "0.4.0"
+yara = "0.4.2"
+log = "0.4"

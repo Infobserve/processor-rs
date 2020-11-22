@@ -1,14 +1,14 @@
 use std::fs;
 use std::str;
-use std::error::Error;
+use std::error;
 use log::error;
 
-use yara::{Compiler, Rules, Rule, YrString};
+use yara::{Compiler, Rules, Rule, YrString, YaraError};
 
 use crate::utils;
 use crate::errors;
 
-pub struct Processor {
+struct Processor {
     engine: Rules
 }
 
@@ -38,7 +38,7 @@ impl Processor {
     /// # Errors
     ///
     /// `crate::errors::NoYaraRulesError` - When no `.yar` files can be found under `rule_root`
-    pub fn from_dir(rule_root: &str) -> Result<Processor, Box<dyn Error>> {
+    fn from_dir(rule_root: &str) -> Result<Processor, Box<dyn error::Error>> {
         let rule_files = utils::rec_get_files_by_ext(rule_root, "yar");
 
         if rule_files.is_empty() {
@@ -53,7 +53,7 @@ impl Processor {
     /// the contents of the provided files
     /// Largely works the same as `Processor::from_dir`, but each file must
     /// be passed explicitly
-    fn with_rule_files(filenames: Vec<String>) -> Result<Processor, Box<dyn Error>> {
+    fn with_rule_files(filenames: Vec<String>) -> Result<Processor, Box<dyn error::Error>> {
         let mut rules: Vec<String> = Vec::new();
         for filename in filenames.into_iter() {
             rules.push(fs::read_to_string(filename)?);
@@ -68,7 +68,7 @@ impl Processor {
     ///
     /// * `rule` - The Yara rule
     #[allow(dead_code)]
-    fn with_rule_str(rule: &str) -> Result<Processor, Box<dyn Error>> {
+    fn with_rule_str(rule: &str) -> Result<Processor, Box<dyn error::Error>> {
         Processor::with_rules(vec![rule.to_string()])
     }
 
@@ -78,7 +78,7 @@ impl Processor {
     /// # Arguments
     ///
     /// * `rules` - A vector of Yara rule strings
-    fn with_rules(rules: Vec<String>) -> Result<Processor, Box<dyn Error>> {
+    fn with_rules(rules: Vec<String>) -> Result<Processor, Box<dyn error::Error>> {
         let mut compiler = Compiler::new()?;
 
         for rule in rules.into_iter() {
@@ -100,13 +100,13 @@ impl Processor {
     /// ```
     /// let p = Processor::with_rule_files("yara-rules/MyPassword.yar");
     /// let matches: Vec<FlatMatch> = p.process("password: HelloWorld").unwrap();
-    /// for m in matches.iter() {
-    ///     m.rule_name; // "MyPassword"
-    ///     m.tags; // ["my", "matched", "rule", "tags"]
-    ///     m.data; // ["HelloWorld"]
+    /// for m in matches {
+    ///     m.rule_name(); // "MyPassword"
+    ///     m.tags(); // ["my", "matched", "rule", "tags"]
+    ///     m.data(); // ["HelloWorld"]
     /// }
     /// ```
-    pub fn process(&self, filestr: &str) -> Result<Vec<FlatMatch>, Box<dyn Error>> {
+    fn process(&self, filestr: &str) -> Result<Vec<FlatMatch>, YaraError> {
         let rules: Vec<Rule> = self.engine.scan_mem(filestr.as_bytes(), 10)?;
         Ok(FlatMatch::from_rules(rules))
     }
@@ -150,14 +150,17 @@ impl FlatMatch {
         FlatMatch::new(rule_name, tags, &byte_data)
     }
 
+    #[allow(dead_code)]
     pub fn rule_name(&self) -> &str {
         &self.rule_name
     }
 
+    #[allow(dead_code)]
     pub fn tags(&self) -> &Vec<String> {
         &self.tags
     }
 
+    #[allow(dead_code)]
     pub fn data(&self) -> &Vec<String> {
         &self.data
     }

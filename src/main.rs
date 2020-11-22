@@ -4,7 +4,6 @@ mod errors;
 mod utils;
 mod processing;
 
-use processing::{Processor, FlatMatch};
 use log::error;
 
 fn main() {
@@ -14,18 +13,16 @@ fn main() {
     });
 
 
-    println!("{}", s.yara_rule_dir());
+    let (sender, receiver) = crossbeam_channel::unbounded();
+    let p_handles = processing::start_processors(&receiver, s.yara_rule_dir(), s.num_processors());
 
-    match Processor::from_dir(s.yara_rule_dir()) {
-        Ok(p) => {
-            let results: Vec<FlatMatch> = p.process("password: hello").unwrap();
+    // Dropping the sender will gracefully close the receiver's end as well
+    // and as such make all processor threads return
+    drop(sender);
 
-            for result in results.iter() {
-                println!("Tags: {:?}", result.tags());
-                println!("Rule name: {:?}", result.rule_name());
-                println!("Data: {:?}", result.data());
-            }
-        },
-        Err(e) => println!("Err: {}", e)
+    // Wait for all threads to return
+    for handle in p_handles {
+        handle.join().unwrap();
+        println!("Joined processor");
     }
 }

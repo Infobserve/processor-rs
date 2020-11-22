@@ -2,11 +2,15 @@ use std::fs;
 use std::str;
 use std::error;
 use log::error;
+use std::thread;
+use std::sync;
 
 use yara::{Compiler, Rules, Rule, YrString, YaraError};
+use crossbeam_channel::Receiver;
 
 use crate::utils;
 use crate::errors;
+use crate::event::Event;
 
 struct Processor {
     engine: Rules
@@ -20,6 +24,57 @@ pub struct FlatMatch {
     tags: Vec<String>,
     data: Vec<String>
 }
+
+
+/// Given the read-end of a crossbeam channel, the path to a Yara rule directory and
+/// the number of processors, spawns `num_processors` processing threads
+/// and returns a vector of join handles for the spawned threads
+pub fn start_processors(feed_recvr: &crossbeam_channel::Receiver<Event>, yara_dir: &str, num_processors: usize) -> Vec<thread::JoinHandle<()>> {
+    let yara_dir_arc = sync::Arc::new(String::from(yara_dir));
+    let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::new();
+
+    for _ in 0..num_processors {
+        p_handles.push(process_forever(feed_recvr, &yara_dir_arc));
+    }
+
+    p_handles
+}
+
+/// Given the read-end of a crossbeam channel and a Yara rule directory,
+/// spawns a new thread which continuously reads events from the channel and passes them
+/// through the processor
+/// TODO: Expand the docstring here once the DB loader is completed
+/// Returns the join handle for the newly spawned thread
+fn process_forever(
+    feed_recvr: &crossbeam_channel::Receiver<Event>,
+    yara_dir_arc: &sync::Arc<String>
+) -> thread::JoinHandle<()> {
+    let rx = Receiver::clone(feed_recvr);
+    let yara_dir = sync::Arc::clone(&yara_dir_arc);
+    thread::spawn(move || {
+        let p = match Processor::from_dir(&yara_dir) {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Could not create processor: {}", e);
+                return;
+            }
+        };
+
+        for message in rx {
+            match p.process(message.raw_content()) {
+                Ok(m) => {
+                    if m.len() != 0 {
+                        println!("Thread: {:?} -- Event {} matched ({})", thread::current().id(), message.id(), message.raw_content());
+                    } else {
+                        println!("Thread: {:?} -- Event {} did not match ({})", thread::current().id(), message.id(), message.raw_content());
+                    }
+                }
+                Err(e) => println!("Whoops: {:?}", e)
+            }
+        }
+    })
+}
+
 
 impl Processor {
     /// Constructs a Processor object whose rules have been loaded recursively

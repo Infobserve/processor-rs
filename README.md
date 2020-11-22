@@ -45,7 +45,7 @@ If you also want to make sure that Yara was installed correctly, go ahead and ru
 ```
 $ git clone https://gitub.com/Infobserve/processor-rs
 $ cd processor-rs
-$ cargo install --path .
+$ cargo check # Check that everything is OK
 ```
 
 If the last command fails with something like the following: 

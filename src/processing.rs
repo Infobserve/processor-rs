@@ -1,14 +1,18 @@
 use std::fs;
 use std::str;
-use std::error::Error;
+use std::error;
 use log::error;
+use std::thread;
+use std::sync;
 
-use yara::{Compiler, Rules, Rule, YrString};
+use yara::{Compiler, Rules, Rule, YrString, YaraError};
+use crossbeam_channel::Receiver;
 
 use crate::utils;
 use crate::errors;
+use crate::event::Event;
 
-pub struct Processor {
+struct Processor {
     engine: Rules
 }
 
@@ -20,6 +24,57 @@ pub struct FlatMatch {
     tags: Vec<String>,
     data: Vec<String>
 }
+
+
+/// Given the read-end of a crossbeam channel, the path to a Yara rule directory and
+/// the number of processors, spawns `num_processors` processing threads
+/// and returns a vector of join handles for the spawned threads
+pub fn start_processors(feed_recvr: &crossbeam_channel::Receiver<Event>, yara_dir: &str, num_processors: usize) -> Vec<thread::JoinHandle<()>> {
+    let yara_dir_arc = sync::Arc::new(yara_dir.to_owned());
+    let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::new();
+
+    for _ in 0..num_processors {
+        p_handles.push(process_forever(feed_recvr, &yara_dir_arc));
+    }
+
+    p_handles
+}
+
+/// Given the read-end of a crossbeam channel and a Yara rule directory,
+/// spawns a new thread which continuously reads events from the channel and passes them
+/// through the processor
+/// TODO: Expand the docstring here once the DB loader is completed
+/// Returns the join handle for the newly spawned thread
+fn process_forever(
+    feed_recvr: &crossbeam_channel::Receiver<Event>,
+    yara_dir_arc: &sync::Arc<String>
+) -> thread::JoinHandle<()> {
+    let rx = Receiver::clone(feed_recvr);
+    let yara_dir = sync::Arc::clone(&yara_dir_arc);
+    thread::spawn(move || {
+        let p = match Processor::from_dir(&yara_dir) {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Could not create processor: {}", e);
+                return;
+            }
+        };
+
+        for message in rx {
+            match p.process(message.raw_content()) {
+                Ok(m) => {
+                    if !m.is_empty() {
+                        println!("Thread: {:?} -- Event {} matched ({})", thread::current().id(), message.id(), message.raw_content());
+                    } else {
+                        println!("Thread: {:?} -- Event {} did not match ({})", thread::current().id(), message.id(), message.raw_content());
+                    }
+                }
+                Err(e) => println!("Whoops: {:?}", e)
+            }
+        }
+    })
+}
+
 
 impl Processor {
     /// Constructs a Processor object whose rules have been loaded recursively
@@ -38,7 +93,7 @@ impl Processor {
     /// # Errors
     ///
     /// `crate::errors::NoYaraRulesError` - When no `.yar` files can be found under `rule_root`
-    pub fn from_dir(rule_root: &str) -> Result<Processor, Box<dyn Error>> {
+    fn from_dir(rule_root: &str) -> Result<Processor, Box<dyn error::Error>> {
         let rule_files = utils::rec_get_files_by_ext(rule_root, "yar");
 
         if rule_files.is_empty() {
@@ -53,7 +108,7 @@ impl Processor {
     /// the contents of the provided files
     /// Largely works the same as `Processor::from_dir`, but each file must
     /// be passed explicitly
-    fn with_rule_files(filenames: Vec<String>) -> Result<Processor, Box<dyn Error>> {
+    fn with_rule_files(filenames: Vec<String>) -> Result<Processor, Box<dyn error::Error>> {
         let mut rules: Vec<String> = Vec::new();
         for filename in filenames.into_iter() {
             rules.push(fs::read_to_string(filename)?);
@@ -68,7 +123,7 @@ impl Processor {
     ///
     /// * `rule` - The Yara rule
     #[allow(dead_code)]
-    fn with_rule_str(rule: &str) -> Result<Processor, Box<dyn Error>> {
+    fn with_rule_str(rule: &str) -> Result<Processor, Box<dyn error::Error>> {
         Processor::with_rules(vec![rule.to_string()])
     }
 
@@ -78,7 +133,7 @@ impl Processor {
     /// # Arguments
     ///
     /// * `rules` - A vector of Yara rule strings
-    fn with_rules(rules: Vec<String>) -> Result<Processor, Box<dyn Error>> {
+    fn with_rules(rules: Vec<String>) -> Result<Processor, Box<dyn error::Error>> {
         let mut compiler = Compiler::new()?;
 
         for rule in rules.into_iter() {
@@ -100,13 +155,13 @@ impl Processor {
     /// ```
     /// let p = Processor::with_rule_files("yara-rules/MyPassword.yar");
     /// let matches: Vec<FlatMatch> = p.process("password: HelloWorld").unwrap();
-    /// for m in matches.iter() {
-    ///     m.rule_name; // "MyPassword"
-    ///     m.tags; // ["my", "matched", "rule", "tags"]
-    ///     m.data; // ["HelloWorld"]
+    /// for m in matches {
+    ///     m.rule_name(); // "MyPassword"
+    ///     m.tags(); // ["my", "matched", "rule", "tags"]
+    ///     m.data(); // ["HelloWorld"]
     /// }
     /// ```
-    pub fn process(&self, filestr: &str) -> Result<Vec<FlatMatch>, Box<dyn Error>> {
+    fn process(&self, filestr: &str) -> Result<Vec<FlatMatch>, YaraError> {
         let rules: Vec<Rule> = self.engine.scan_mem(filestr.as_bytes(), 10)?;
         Ok(FlatMatch::from_rules(rules))
     }
@@ -121,7 +176,7 @@ impl FlatMatch {
     ///
     /// * `rules` - A vector of the rules matched by the Yara engine
     fn from_rules(rules: Vec<Rule>) -> Vec<FlatMatch> {
-        rules.into_iter().map(|r| FlatMatch::from_rule(r)).collect()
+        rules.into_iter().map(FlatMatch::from_rule).collect()
     }
 
     /// Consumes and converts a `yara::Rule` object into a `FlatMatch`
@@ -137,7 +192,7 @@ impl FlatMatch {
         let rule_strings: Vec<YrString> = rule.strings;
         for rule_string in rule_strings.into_iter() {
             // We don't care about zero length matches
-            if rule_string.matches.len() == 0 {
+            if rule_string.matches.is_empty() {
                 continue;
             }
             let rule_matches = rule_string.matches;
@@ -150,14 +205,17 @@ impl FlatMatch {
         FlatMatch::new(rule_name, tags, &byte_data)
     }
 
+    #[allow(dead_code)]
     pub fn rule_name(&self) -> &str {
         &self.rule_name
     }
 
+    #[allow(dead_code)]
     pub fn tags(&self) -> &Vec<String> {
         &self.tags
     }
 
+    #[allow(dead_code)]
     pub fn data(&self) -> &Vec<String> {
         &self.data
     }
@@ -183,9 +241,9 @@ impl FlatMatch {
     /// let fm = FlatMatcH::new(String::from("MyRule"), vec!["hey", "ya"], vec![vec![66, 6f, 6f], vec![62, 61, 72]])
     /// assert_eq!(fm.data, ["foo".to_string(), "bar".to_string()])
     /// ```
-    fn new(rule_name: String, tags: Vec<String>, matches: &Vec<Vec<u8>>) -> FlatMatch {
+    fn new(rule_name: String, tags: Vec<String>, matches: &[Vec<u8>]) -> FlatMatch {
         let mut data: Vec<String> = Vec::new();
-        for single_match in matches.into_iter() {
+        for single_match in matches {
             match str::from_utf8(&single_match) {
                 Ok(match_string) => data.push(match_string.to_string()),
                 Err(e) => error!("Could not convert byte array {:?} into string ({}) for Rule {}", single_match, e, rule_name)

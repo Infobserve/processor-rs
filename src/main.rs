@@ -3,10 +3,13 @@ mod event;
 mod errors;
 mod utils;
 mod processing;
+mod logger;
 
 use log::error;
 
 fn main() {
+    logger::init().unwrap();
+
     let s = settings::Settings::from_file("config.yaml").unwrap_or_else(|e| {
         error!("Could not load configuration file: {}", e);
         std::process::exit(1);

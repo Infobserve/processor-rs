@@ -30,7 +30,7 @@ pub struct FlatMatch {
 /// the number of processors, spawns `num_processors` processing threads
 /// and returns a vector of join handles for the spawned threads
 pub fn start_processors(feed_recvr: &crossbeam_channel::Receiver<Event>, yara_dir: &str, num_processors: usize) -> Vec<thread::JoinHandle<()>> {
-    let yara_dir_arc = sync::Arc::new(String::from(yara_dir));
+    let yara_dir_arc = sync::Arc::new(yara_dir.to_owned());
     let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::new();
 
     for _ in 0..num_processors {
@@ -63,7 +63,7 @@ fn process_forever(
         for message in rx {
             match p.process(message.raw_content()) {
                 Ok(m) => {
-                    if m.len() != 0 {
+                    if !m.is_empty() {
                         println!("Thread: {:?} -- Event {} matched ({})", thread::current().id(), message.id(), message.raw_content());
                     } else {
                         println!("Thread: {:?} -- Event {} did not match ({})", thread::current().id(), message.id(), message.raw_content());
@@ -176,7 +176,7 @@ impl FlatMatch {
     ///
     /// * `rules` - A vector of the rules matched by the Yara engine
     fn from_rules(rules: Vec<Rule>) -> Vec<FlatMatch> {
-        rules.into_iter().map(|r| FlatMatch::from_rule(r)).collect()
+        rules.into_iter().map(FlatMatch::from_rule).collect()
     }
 
     /// Consumes and converts a `yara::Rule` object into a `FlatMatch`
@@ -192,7 +192,7 @@ impl FlatMatch {
         let rule_strings: Vec<YrString> = rule.strings;
         for rule_string in rule_strings.into_iter() {
             // We don't care about zero length matches
-            if rule_string.matches.len() == 0 {
+            if rule_string.matches.is_empty() {
                 continue;
             }
             let rule_matches = rule_string.matches;
@@ -241,9 +241,9 @@ impl FlatMatch {
     /// let fm = FlatMatcH::new(String::from("MyRule"), vec!["hey", "ya"], vec![vec![66, 6f, 6f], vec![62, 61, 72]])
     /// assert_eq!(fm.data, ["foo".to_string(), "bar".to_string()])
     /// ```
-    fn new(rule_name: String, tags: Vec<String>, matches: &Vec<Vec<u8>>) -> FlatMatch {
+    fn new(rule_name: String, tags: Vec<String>, matches: &[Vec<u8>]) -> FlatMatch {
         let mut data: Vec<String> = Vec::new();
-        for single_match in matches.into_iter() {
+        for single_match in matches {
             match str::from_utf8(&single_match) {
                 Ok(match_string) => data.push(match_string.to_string()),
                 Err(e) => error!("Could not convert byte array {:?} into string ({}) for Rule {}", single_match, e, rule_name)

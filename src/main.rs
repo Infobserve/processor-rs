@@ -14,7 +14,7 @@ fn main() {
 
 
     let (sender, receiver) = crossbeam_channel::unbounded();
-    let p_handles = processing::start_processors(&receiver, s.yara_rule_dir(), s.num_processors());
+    let p_handles = processing::start_processors(&receiver, s.yara_rule_dir(), s.num_processors() as usize);
 
     // Dropping the sender will gracefully close the receiver's end as well
     // and as such make all processor threads return

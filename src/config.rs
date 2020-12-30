@@ -356,9 +356,9 @@ mod tests {
         let cfg = Config::from_string(yml).unwrap();
         let workers = cfg.workers();
 
-        assert_ne!(workers.num_processors(), DEFAULT_NUM_PROCESSORS);
-        assert_ne!(workers.num_feeders(), DEFAULT_NUM_FEEDERS);
-        assert_ne!(workers.num_loaders(), DEFAULT_NUM_LOADERS);
+        assert_ne!(workers.num_processors(), 0);
+        assert_ne!(workers.num_feeders(), 0);
+        assert_ne!(workers.num_loaders(), 0);
     }
 
     #[test]

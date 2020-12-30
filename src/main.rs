@@ -54,7 +54,7 @@ fn main() {
         &feed_recvr,
         &load_sendr,
         cfg.yara_rule_dir(),
-        cfg.workers().num_processors()
+        cfg.workers().num_processors() as usize
     );
 
     let l_handles = database::start_loaders(&load_recvr, db_loader, cfg.workers().num_loaders());
@@ -68,7 +68,12 @@ fn main() {
     // that have events left in their queue will panic when they try to send matching ones
     // to the loader through the load channel
     for handle in p_handles {
-        handle.join().unwrap();
+        if let Ok(res) = handle.join() {
+            match res {
+                Ok(s) => println!("{}", s),
+                Err(e) => println!("Error in processor: {}", e)
+            }
+        }
         println!("Joined processor");
     }
 

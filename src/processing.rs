@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{fs, str, thread, sync::Arc};
+use std::{fs, str, thread, sync::Arc, time, fmt};
 use log::{info, warn, error};
 
 use yara::{Compiler, Rules, Rule, YaraError};
@@ -57,16 +57,12 @@ pub fn start_processors(
     feed_recvr: &Receiver<Event>,
     load_sendr: &Sender<ProcessedEvent>,
     yara_dir: &str,
-    num_processors: i32
-) -> Vec<thread::JoinHandle<()>> {
-    if num_processors == 0 {
-        panic!("Refusing to continue with 0 processors -- Process would hang");
-    }
-
+    num_processors: usize
+) -> Vec<thread::JoinHandle<Result<Stats>>> {
     let yara_dir_arc = Arc::new(yara_dir.to_owned());
-    let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(num_processors as usize);
+    let mut p_handles: Vec<thread::JoinHandle<Result<Stats>>> = Vec::new();
 
-    info!("Spawning {}", pluralize(num_processors, "processor"));
+    info!("Spawning {}", pluralize(num_processors as i64, "processor"));
     for _ in 0..num_processors {
         p_handles.push(process_forever(feed_recvr, load_sendr, &yara_dir_arc));
     }
@@ -86,34 +82,37 @@ fn process_forever(
     feed_recvr: &Receiver<Event>,
     load_sendr: &Sender<ProcessedEvent>,
     yara_dir_arc: &Arc<String>
-) -> thread::JoinHandle<()> {
+) -> thread::JoinHandle<Result<Stats>> {
     let rx = Receiver::clone(feed_recvr);
     let sx = Sender::clone(load_sendr);
     let yara_dir = Arc::clone(&yara_dir_arc);
 
     thread::spawn(move || {
-        let p = match Processor::from_dir(&yara_dir) {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Could not create processor: {}", e);
-                return;
-            }
-        };
+        let mut stats = Stats::new();
 
-        for event in rx {
-            match p.process(event.raw_content()) {
+        let p = Processor::from_dir(&yara_dir)?;
+
+        for message in rx {
+            let start = time::Instant::now();
+            stats.inc_events();
+            match p.process(message.raw_content()) {
                 Ok(m) => {
                     if !m.is_empty() {
-                        if let Err(e) = sx.send(ProcessedEvent(event, m)) {
+                        stats.inc_matches();
+                        if let Err(e) = sx.send(ProcessedEvent(message, m)) {
                             error!("Failed to send processed event: {}", e);
+                            stats.inc_failures();
                         }
                     } else {
-                        warn!("Zero length match? {:?}", event);
+                        warn!("Zero length match? {:?}", message);
                     }
                 }
                 Err(e) => println!("Whoops: {:?}", e)
             }
+            stats.add_duration(start.elapsed());
         }
+
+        Ok(stats)
     })
 }
 
@@ -212,6 +211,77 @@ impl Processor {
     }
 }
 
+pub struct Stats {
+    overall_proc_time: time::Duration,
+    num_events: u32,
+    num_matches: u32,
+    num_failures: u32
+}
+
+impl Stats {
+    fn new() -> Self {
+        Self {
+            overall_proc_time: time::Duration::from_secs(0),
+            num_events: 0,
+            num_matches: 0,
+            num_failures: 0
+        }
+    }
+
+    fn add_duration(&mut self, elapsed: time::Duration) {
+        self.overall_proc_time += elapsed;
+    }
+
+    fn inc_events(&mut self) {
+        self.num_events += 1;
+    }
+
+    fn inc_matches(&mut self) {
+        self.num_matches += 1;
+    }
+
+    fn inc_failures(&mut self) {
+        self.num_failures += 1;
+    }
+
+    pub fn overall_proc_time(&self) -> time::Duration {
+        self.overall_proc_time
+    }
+
+    pub fn avg_proc_time(&self) -> time::Duration {
+        if self.num_events == 0 {
+            return time::Duration::from_secs(0);
+        }
+
+        self.overall_proc_time / self.num_events
+    }
+
+    pub fn num_events(&self) -> u32 {
+        self.num_events
+    }
+
+    pub fn num_matches(&self) -> u32 {
+        self.num_matches
+    }
+
+    pub fn num_failures(&self) -> u32 {
+        self.num_failures
+    }
+}
+
+impl fmt::Display for Stats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "  Overall time spent processing: {}\n  Average time per event processing: {}\n  Events processed: {}\n  Events matched: {}",
+            self.overall_proc_time().as_millis(),
+            self.avg_proc_time().as_millis(),
+            self.num_events(),
+            self.num_matches()
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +331,55 @@ mod tests {
         assert_eq!(matches[0].rule_name(), String::from("default::MyPass"));
         assert_eq!(matches[0].tags().len(), 0);
         assert_eq!(*matches[0].data()[0], String::from("pw: helloworld"));
+    }
+
+    #[test]
+    fn stats_start_from_zero() {
+        let s = Stats::new();
+        assert_eq!(s.overall_proc_time().as_millis(), 0);
+        assert_eq!(s.num_events(), 0);
+        assert_eq!(s.num_matches(), 0);
+    }
+
+    #[test]
+    fn stats_count_events_correctly() {
+        let mut s = Stats::new();
+        s.inc_events();
+        assert_eq!(s.num_events(), 1);
+    }
+
+    #[test]
+    fn stats_count_matches_correctly() {
+        let mut s = Stats::new();
+        s.inc_matches();
+        assert_eq!(s.num_matches(), 1);
+    }
+
+    #[test]
+    fn stats_return_zero_avg_time_when_no_events_are_processed() {
+        let s = Stats::new();
+        assert_eq!(s.avg_proc_time().as_millis(), 0);
+    }
+
+    #[test]
+    fn stats_count_overall_duration_correctly() {
+        let mut s = Stats::new();
+        let d1 = time::Duration::from_millis(10);
+        s.add_duration(d1);
+        let d2 = time::Duration::from_secs(1);
+        s.add_duration(d2);
+        assert_eq!(s.overall_proc_time, time::Duration::from_millis(1010));
+    }
+
+    #[test]
+    fn stats_calculates_avg_correctly() {
+        let mut s = Stats::new();
+        let d = time::Duration::from_secs(1);
+        s.add_duration(d);
+        for _ in 0..5 {
+            s.inc_events();
+        }
+
+        assert_eq!(s.avg_proc_time().as_millis(), 200);
     }
 }

@@ -3,3 +3,4 @@ Cargo.lock
 config.yaml
 logs
 *.swp
+.idea

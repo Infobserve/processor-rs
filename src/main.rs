@@ -8,7 +8,7 @@ mod database;
 mod entities;
 mod logger;
 
-use database::DbConnection;
+use database::{DbLoader, DbConnection};
 
 fn main() {
     logger::init().unwrap();

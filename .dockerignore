@@ -1,0 +1,6 @@
+target/
+*.tpl.yaml
+README.md
+.gitignore
+**/.git
+Dockerfile

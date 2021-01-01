@@ -8,6 +8,6 @@ database:
     user: username # Default: postgres
     passwd: password # Either set this, or the INFOBSERVE_POSTGRES_PASSWD environmental variable
                      # (this value takes precedence). Default: infobserve
-    database: database # The database to connect. Default: postgres
+    db_name: database # The database to connect. Default: postgres
     host: host # Default: localhost
     port: port # Default: 5432

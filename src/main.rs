@@ -8,16 +8,38 @@ mod database;
 mod entities;
 mod logger;
 
+use std::process;
+
 use database::{DbLoader, DbConnection};
 
 fn main() {
-    logger::init().unwrap();
-    let s = settings::Settings::from_file("config.yaml").unwrap_or_else(|e| {
-        error!("Could not load configuration file: {}", e);
-        std::process::exit(1);
-    });
+    if let Err(e) = logger::init() {
+        error!("Could not initialize logger: {}", e);
+        process::exit(1);
+    }
 
-    let connection = DbConnection::connect(s.db_user(), s.db_passwd(), s.db_database(), s.db_host(), s.db_port()).unwrap();
+    let s = match settings::Settings::from_file("config.yaml") {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Could not load configuration file: {}", e);
+            process::exit(1);
+        }
+
+    };
+
+    let connection = match DbConnection::connect(
+        s.db_user(),
+        s.db_passwd(),
+        s.db_database(),
+        s.db_host(),
+        s.db_port()) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Could not connect to database: {}", e);
+            process::exit(1);
+        }
+    };
+
     let db_loader = DbLoader::with_connection(connection);
 
     if let Err(e) = db_loader.create_schema() {

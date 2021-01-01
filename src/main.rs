@@ -1,6 +1,6 @@
 use log::error;
 
-mod settings;
+mod config;
 mod errors;
 mod utils;
 mod processing;
@@ -10,6 +10,7 @@ mod logger;
 
 use std::process;
 
+use config::Config;
 use database::{DbLoader, DbConnection};
 
 fn main() {
@@ -18,8 +19,8 @@ fn main() {
         process::exit(1);
     }
 
-    let s = match settings::Settings::from_file("config.yaml") {
-        Ok(s) => s,
+    let cfg = match Config::from_file("config.yaml") {
+        Ok(c) => c,
         Err(e) => {
             error!("Could not load configuration file: {}", e);
             process::exit(1);
@@ -28,11 +29,11 @@ fn main() {
     };
 
     let connection = match DbConnection::connect(
-        s.db_user(),
-        s.db_passwd(),
-        s.db_database(),
-        s.db_host(),
-        s.db_port()) {
+        cfg.db().user(),
+        cfg.db().passwd(),
+        cfg.db().db_name(),
+        cfg.db().host(),
+        cfg.db().port()) {
         Ok(c) => c,
         Err(e) => {
             error!("Could not connect to database: {}", e);
@@ -53,11 +54,11 @@ fn main() {
     let p_handles = processing::start_processors(
         &feed_recvr,
         &load_sendr,
-        s.yara_rule_dir(),
-        s.num_processors()
+        cfg.yara_rule_dir(),
+        cfg.workers().num_processors()
     );
 
-    let l_handles = database::start_loaders(&load_recvr, db_loader, s.num_loaders());
+    let l_handles = database::start_loaders(&load_recvr, db_loader, cfg.workers().num_loaders());
 
     // Dropping the sender will gracefully close the receiver's end as well
     // and as such make all processor threads return

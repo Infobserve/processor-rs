@@ -1,30 +1,44 @@
 use log::{info, warn};
 use std::fs;
+use std::env;
 
 use anyhow::Result;
+use yaml_rust::{YamlLoader, Yaml};
 
-use yaml_rust::YamlLoader;
 use crate::errors;
 
 const DEFAULT_NUM_PROCESSORS: i32 = 1;
 const DEFAULT_NUM_FEEDERS: i32 = 1;
+const DEFAULT_NUM_LOADERS: i32 = 1;
 const DEFAULT_YARA_RULE_DIR: &str = "yara-rules/";
+
+const DEFAULT_DB_USER: &str = "postgres";
+const DEFAULT_DB_PASSWD: &str = "infobserve";
+const DEFAULT_DB_DATABASE: &str = "postgres";
+const DEFAULT_DB_HOST: &str = "localhost";
+const DEFAULT_DB_PORT: u16 = 5432;
 
 #[derive(PartialEq, Debug)]
 pub struct Settings {
     yara_rule_dir: String,
-    num_processors: i32,
-    num_feeders: i32
+    worker_settings: WorkerSettings,
+    db_settings: DbSettings
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            yara_rule_dir: String::from(DEFAULT_YARA_RULE_DIR),
-            num_processors: DEFAULT_NUM_PROCESSORS,
-            num_feeders: DEFAULT_NUM_FEEDERS
-        }
-    }
+#[derive(PartialEq, Debug)]
+struct DbSettings {
+    user: String,
+    passwd: String,
+    database: String,
+    host: String,
+    port: u16
+}
+
+#[derive(PartialEq, Debug)]
+struct WorkerSettings {
+    num_processors: i32,
+    num_feeders: i32,
+    num_loaders: i32
 }
 
 impl Settings {
@@ -48,19 +62,41 @@ impl Settings {
         }
     }
 
-    #[allow(dead_code)]
     pub fn num_processors(&self) -> i32 {
-        self.num_processors
+        self.worker_settings.num_processors
     }
 
     #[allow(dead_code)]
     pub fn num_feeders(&self) -> i32 {
-        self.num_feeders
+        self.worker_settings.num_feeders
     }
 
-    #[allow(dead_code)]
+    pub fn num_loaders(&self) -> i32 {
+        self.worker_settings.num_loaders
+    }
+
     pub fn yara_rule_dir(&self) -> &str {
         &self.yara_rule_dir
+    }
+
+    pub fn db_user(&self) -> &str {
+        &self.db_settings.user
+    }
+
+    pub fn db_passwd(&self) -> &str {
+        &self.db_settings.passwd
+    }
+
+    pub fn db_database(&self) -> &str {
+        &self.db_settings.database
+    }
+
+    pub fn db_host(&self) -> &str {
+        &self.db_settings.host
+    }
+
+    pub fn db_port(&self) -> u16 {
+        self.db_settings.port
     }
 
     fn from_string(yml: &str) -> Result<Settings> {
@@ -74,33 +110,111 @@ impl Settings {
 
         let doc = &docs[0];
 
-        let rule_dir = doc["yara_rule_dir"].as_str();
-        let processors = doc["workers"]["processors"].as_i64();
-        let feeders = doc["workers"]["feeders"].as_i64();
+        let rule_dir = doc["yara_rule_dir"].as_str().unwrap_or(DEFAULT_YARA_RULE_DIR);
+        let worker_settings = WorkerSettings::from_block(&doc["workers"])?;
+        let db_settings = DbSettings::from_block(&doc["database"]);
 
-        Settings::build_from_config(rule_dir, processors, feeders)
-    }
-
-    fn build_from_config(
-        rule_dir: Option<&str>,
-        processors: Option<i64>,
-        feeders: Option<i64>
-    ) -> Result<Settings> {
-        let yara_rule_dir = rule_dir.unwrap_or(DEFAULT_YARA_RULE_DIR);
-        let num_processors = processors.unwrap_or(DEFAULT_NUM_PROCESSORS as i64) as i32;
-        let num_feeders = feeders.unwrap_or(DEFAULT_NUM_FEEDERS as i64) as i32;
-
-        if num_processors <= 0 || num_feeders <= 0 {
-            return Err(errors::NonPositiveWorkersError.into());
-        }
-
-        Ok(Settings {
-            yara_rule_dir: String::from(yara_rule_dir),
-            num_processors: num_processors,
-            num_feeders: num_feeders
+        Ok(Self {
+            yara_rule_dir: rule_dir.to_owned(),
+            worker_settings,
+            db_settings
         })
     }
 }
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            yara_rule_dir: DEFAULT_YARA_RULE_DIR.to_owned(),
+            db_settings: Default::default(),
+            worker_settings: Default::default()
+        }
+    }
+}
+
+impl WorkerSettings {
+    fn from_block(block: &Yaml) -> Result<Self> {
+        let num_processors = Self::int_or_default(&block["processors"], DEFAULT_NUM_PROCESSORS);
+        let num_feeders = Self::int_or_default(&block["feeders"], DEFAULT_NUM_FEEDERS);
+        let num_loaders = Self::int_or_default(&block["loaders"], DEFAULT_NUM_LOADERS);
+
+        if num_processors <= 0 || num_feeders <= 0 || num_loaders <= 0 {
+            return Err(errors::NonPositiveWorkersError.into());
+        }
+
+        Ok(Self {
+            num_processors,
+            num_feeders,
+            num_loaders
+        })
+    }
+
+    fn int_or_default(block: &Yaml, default: i32) -> i32 {
+        block.as_i64().unwrap_or(default as i64) as i32
+    }
+}
+
+impl Default for WorkerSettings {
+    fn default() -> Self {
+        Self {
+            num_processors: DEFAULT_NUM_PROCESSORS,
+            num_feeders: DEFAULT_NUM_FEEDERS,
+            num_loaders: DEFAULT_NUM_LOADERS
+        }
+    }
+}
+
+
+impl DbSettings {
+    fn from_block(yaml_block: &Yaml) -> Self {
+        let user = match yaml_block["user"].as_str() {
+            Some(u) => u,
+            None => DEFAULT_DB_USER
+        }.to_owned();
+        let passwd = match yaml_block["passwd"].as_str() {
+            Some(p) => p.to_owned(),
+            None => {
+                match env::var("INFOBSERVE_POSTGRES_PASSWD") {
+                    Ok(v) => v,
+                    Err(_) => DEFAULT_DB_PASSWD.to_owned()
+                }
+            }
+        };
+        let database = match yaml_block["database"].as_str() {
+            Some(d) => d,
+            None => DEFAULT_DB_DATABASE
+        }.to_owned();
+        let host = match yaml_block["host"].as_str() {
+            Some(h) => h,
+            None => DEFAULT_DB_HOST
+        }.to_owned();
+        let port = match yaml_block["port"].as_i64() {
+            Some(p) => p as u16,
+            None => DEFAULT_DB_PORT
+        };
+
+        Self {
+            user,
+            passwd,
+            database,
+            host,
+            port
+        }
+    }
+}
+
+impl Default for DbSettings {
+    fn default() -> Self {
+        Self {
+            user: DEFAULT_DB_USER.to_owned(),
+            passwd: DEFAULT_DB_PASSWD.to_owned(),
+            database: DEFAULT_DB_DATABASE.to_owned(),
+            host: DEFAULT_DB_HOST.to_owned(),
+            port: DEFAULT_DB_PORT
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -122,14 +236,22 @@ mod tests {
         let yml = r#"
         workers:
             processors: 2
+            loaders: 5
         yara_rule_dir: foo
         "#;
+
+        let worker_settings = WorkerSettings {
+            num_processors: 2,
+            num_feeders: DEFAULT_NUM_FEEDERS,
+            num_loaders: 5
+        };
+
         assert_eq!(
             Settings::from_string(yml).unwrap(),
             Settings {
                 yara_rule_dir: String::from("foo"),
-                num_processors: 2,
-                num_feeders: DEFAULT_NUM_FEEDERS
+                worker_settings,
+                db_settings: Default::default()
             }
         );
     }
@@ -140,12 +262,46 @@ mod tests {
         workers:
             feeders: 5
         "#;
+        let worker_settings = WorkerSettings {
+            num_processors: DEFAULT_NUM_PROCESSORS,
+            num_feeders: 5,
+            num_loaders: DEFAULT_NUM_LOADERS
+        };
         assert_eq!(
             Settings::from_string(yml).unwrap(),
             Settings {
                 yara_rule_dir: String::from(DEFAULT_YARA_RULE_DIR),
-                num_processors: DEFAULT_NUM_PROCESSORS,
-                num_feeders: 5
+                worker_settings,
+                db_settings: Default::default()
+            }
+        )
+    }
+
+    #[test]
+    fn returns_correct_db_values() {
+        let yml = r#"
+        database:
+            host: localhost
+            port: 1337
+            database: my_db
+            user: my_user
+            passwd: my_passwd
+        "#;
+
+        let db_settings = DbSettings {
+            user: "my_user".to_owned(),
+            passwd: "my_passwd".to_owned(),
+            database: "my_db".to_owned(),
+            host: "localhost".to_owned(),
+            port: 1337
+        };
+
+        assert_eq!(
+            Settings::from_string(yml).unwrap(),
+            Settings {
+                yara_rule_dir: String::from(DEFAULT_YARA_RULE_DIR),
+                db_settings,
+                worker_settings: Default::default()
             }
         )
     }

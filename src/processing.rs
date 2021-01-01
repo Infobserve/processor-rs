@@ -1,40 +1,73 @@
-use std::fs;
-use std::str;
-use std::error;
-use log::error;
-use std::thread;
-use std::sync;
+#![allow(dead_code)]
 
-use yara::{Compiler, Rules, Rule, YrString, YaraError};
-use crossbeam_channel::Receiver;
+use std::{fs, str, error, thread, sync};
+use log::{info, warn, error};
+
+use yara::{Compiler, Rules, Rule, YaraError};
+use crossbeam_channel::{Sender, Receiver};
 
 use crate::utils;
 use crate::errors;
-use crate::event::Event;
+use crate::entities::{Event, FlatMatch, ProcessedEvent};
 
-struct Processor {
-    engine: Rules
-}
+/// Spawns `num_processors` threads each of which continuously pops from the read-end of a crossbeam channel,
+/// processes the events, enriches matching ones with additional information (e.g. the matched string) and pushes them
+/// to the write-end of another crossbeam channel -- These are later stored in Postgres by another thread
+/// 
+/// # Arguments
+/// 
+/// * feed_recvr - The read-end of a crossbeam channel. While the write-end is not dropped, all threads hang
+///                until an event is available (only one thread processes each event)
+/// * load_sendr - The write-end of a crossbeam channel. After processing events, it turns them into `ProcessedEvent` objects
+///                (the initial event (`Event`) + information on the match (`FlatMatch`)) and pushes them into the channel
+/// * yara_dir - The fully qualified path to the root of a yara rule directory. This directory will be recursively walked and
+///              all Yara rule files (*.yar) will be loaded to the processor
+/// * num_processors - The number of threads to spawn. Each will hang on `feed_recvr` waiting for new messages (events)
+/// 
+/// # Return
+/// Returns a vector of join handles that can be used to join the threads after the feed crossbeam channel's write-end
+/// has been dropped. Notice that since all processing workers handle errors themselves (if they are salvageable),
+/// the returned join handles carry no information when their respective threads are joined upon
+/// 
+/// # Example
+/// 
+/// ```
+/// use processing::start_processors;
+/// use entities::Event;
+/// 
+/// let (feed_sendr, feed_recvr) = crossbeam_channel::unbounded();
+/// let (load_sendr, load_recvr) = crossbeam_channel::unbounded();
+///
+/// let handles: Vec<JoinHandle<()>> = start_processors(&feed_recevr, &load_sendr, "path/to/yara/dir", 3);
+///
+/// assert_eq!(handles.len(), 3);
+/// // Note that it's the responsibility of the thread that created the crossbeam channels to drop them as well
+/// // let e = Event::new(...);
+/// // feed_sendr.send(e);
+///
+/// drop(feed_sendr);
+/// drop(load_sendr);
+///
+/// for handle in handles {
+///     handle.join().unwrap();
+/// }
+/// ```
+pub fn start_processors(
+    feed_recvr: &Receiver<Event>,
+    load_sendr: &Sender<ProcessedEvent>,
+    yara_dir: &str,
+    num_processors: i32
+) -> Vec<thread::JoinHandle<()>> {
+    if num_processors == 0 {
+        panic!("Refusing to continue with 0 processors -- Process would hang");
+    }
 
-pub struct FlatMatch {
-    /// `The yara::Rule` structure is complicated and largely unnecessary for our needs
-    /// This struct is a flat(ter) representation of the above, that only stores the matched rule's
-    /// name, tags and data (the actual matches)
-    rule_name: String,
-    tags: Vec<String>,
-    data: Vec<String>
-}
-
-
-/// Given the read-end of a crossbeam channel, the path to a Yara rule directory and
-/// the number of processors, spawns `num_processors` processing threads
-/// and returns a vector of join handles for the spawned threads
-pub fn start_processors(feed_recvr: &crossbeam_channel::Receiver<Event>, yara_dir: &str, num_processors: usize) -> Vec<thread::JoinHandle<()>> {
     let yara_dir_arc = sync::Arc::new(yara_dir.to_owned());
-    let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::new();
+    let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(num_processors as usize);
 
+    info!("Spawning {}", utils::pluralize(num_processors, "processor"));
     for _ in 0..num_processors {
-        p_handles.push(process_forever(feed_recvr, &yara_dir_arc));
+        p_handles.push(process_forever(feed_recvr, load_sendr, &yara_dir_arc));
     }
 
     p_handles
@@ -42,15 +75,20 @@ pub fn start_processors(feed_recvr: &crossbeam_channel::Receiver<Event>, yara_di
 
 /// Given the read-end of a crossbeam channel and a Yara rule directory,
 /// spawns a new thread which continuously reads events from the channel and passes them
-/// through the processor
-/// TODO: Expand the docstring here once the DB loader is completed
+/// through the processor.
+/// Events that match one or more rules are then persisted
+/// to the DB (see database::loader::DbLoader)
+/// 
 /// Returns the join handle for the newly spawned thread
 fn process_forever(
-    feed_recvr: &crossbeam_channel::Receiver<Event>,
+    feed_recvr: &Receiver<Event>,
+    load_sendr: &Sender<ProcessedEvent>,
     yara_dir_arc: &sync::Arc<String>
 ) -> thread::JoinHandle<()> {
     let rx = Receiver::clone(feed_recvr);
+    let sx = Sender::clone(load_sendr);
     let yara_dir = sync::Arc::clone(&yara_dir_arc);
+
     thread::spawn(move || {
         let p = match Processor::from_dir(&yara_dir) {
             Ok(p) => p,
@@ -60,13 +98,15 @@ fn process_forever(
             }
         };
 
-        for message in rx {
-            match p.process(message.raw_content()) {
+        for event in rx {
+            match p.process(event.raw_content()) {
                 Ok(m) => {
                     if !m.is_empty() {
-                        println!("Thread: {:?} -- Event {} matched ({})", thread::current().id(), message.id(), message.raw_content());
+                        if let Err(e) = sx.send(ProcessedEvent(event, m)) {
+                            error!("Failed to send processed event: {}", e);
+                        }
                     } else {
-                        println!("Thread: {:?} -- Event {} did not match ({})", thread::current().id(), message.id(), message.raw_content());
+                        warn!("Zero length match? {:?}", event);
                     }
                 }
                 Err(e) => println!("Whoops: {:?}", e)
@@ -75,6 +115,9 @@ fn process_forever(
     })
 }
 
+struct Processor {
+    engine: Rules
+}
 
 impl Processor {
     /// Constructs a Processor object whose rules have been loaded recursively
@@ -164,92 +207,6 @@ impl Processor {
     fn process(&self, filestr: &str) -> Result<Vec<FlatMatch>, YaraError> {
         let rules: Vec<Rule> = self.engine.scan_mem(filestr.as_bytes(), 10)?;
         Ok(FlatMatch::from_rules(rules))
-    }
-}
-
-impl FlatMatch {
-
-    /// Used by `Processor#process` to convert `yara::Rule` objects
-    /// to FlatMatch objects
-    ///
-    /// # Arguments
-    ///
-    /// * `rules` - A vector of the rules matched by the Yara engine
-    fn from_rules(rules: Vec<Rule>) -> Vec<FlatMatch> {
-        rules.into_iter().map(FlatMatch::from_rule).collect()
-    }
-
-    /// Consumes and converts a `yara::Rule` object into a `FlatMatch`
-    ///
-    /// # Arguments
-    ///
-    /// * `rule` - A yara::Rule object, as returned by `yara::Compiler.scan_mem`
-    fn from_rule(rule: Rule) -> FlatMatch {
-        let rule_name = format!("{}::{}", rule.namespace, rule.identifier);
-        let tags: Vec<String> = rule.tags.iter().map(|&t| String::from(t)).collect();
-        let mut byte_data: Vec<Vec<u8>> = Vec::<Vec<u8>>::new();
-
-        let rule_strings: Vec<YrString> = rule.strings;
-        for rule_string in rule_strings.into_iter() {
-            // We don't care about zero length matches
-            if rule_string.matches.is_empty() {
-                continue;
-            }
-            let rule_matches = rule_string.matches;
-
-            for single_match in rule_matches.into_iter() {
-                byte_data.push(single_match.data);
-            }
-        }
-
-        FlatMatch::new(rule_name, tags, &byte_data)
-    }
-
-    #[allow(dead_code)]
-    pub fn rule_name(&self) -> &str {
-        &self.rule_name
-    }
-
-    #[allow(dead_code)]
-    pub fn tags(&self) -> &Vec<String> {
-        &self.tags
-    }
-
-    #[allow(dead_code)]
-    pub fn data(&self) -> &Vec<String> {
-        &self.data
-    }
-
-    /// Constructs a new `FlatMatch` object by iterating over the first dimension of `matches`,
-    /// and converting each element of the second from a byte array to a string
-    ///
-    /// If a byte array does not represent a valid unicode byte sequence, it it dropped
-    /// and a warning is emitted. We should be expecting a few of those until we support binary
-    /// events as well
-    ///
-    /// # Arguments
-    ///
-    /// * `rule_name` - The name of the Yara Rule matched
-    /// * `tags` - The tags within the rule that matched
-    /// * `matches` - A vector of u8 vectors (2D), each of which represents a unicode string
-    ///               | \x48 | \x61 | \x78 | \x30 | 0x72 |
-    ///               | \x31 | \x33 | \x33 | \x37 |
-    ///               | ... |
-    ///
-    /// # Examples
-    /// ```
-    /// let fm = FlatMatcH::new(String::from("MyRule"), vec!["hey", "ya"], vec![vec![66, 6f, 6f], vec![62, 61, 72]])
-    /// assert_eq!(fm.data, ["foo".to_string(), "bar".to_string()])
-    /// ```
-    fn new(rule_name: String, tags: Vec<String>, matches: &[Vec<u8>]) -> FlatMatch {
-        let mut data: Vec<String> = Vec::new();
-        for single_match in matches {
-            match str::from_utf8(&single_match) {
-                Ok(match_string) => data.push(match_string.to_string()),
-                Err(e) => error!("Could not convert byte array {:?} into string ({}) for Rule {}", single_match, e, rule_name)
-            }
-        }
-        FlatMatch { rule_name, tags, data }
     }
 }
 

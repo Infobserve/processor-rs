@@ -2,4 +2,12 @@
 workers:
   processors: num_processors # The number of threads the processor will use
   feeders: num_feeders # The number of feeder threads that will provide data to the processors
+  loaders: num_loaders # The number of DB loader threads that will consume processed data and store them in the DB
 yara_rule_dir: path_to_dir # The root of the directory which contains all `.yar` files
+database:
+    user: username # Default: postgres
+    passwd: password # Either set this, or the INFOBSERVE_POSTGRES_PASSWD environmental variable
+                     # (this value takes precedence). Default: infobserve
+    database: database # The database to connect. Default: postgres
+    host: host # Default: localhost
+    port: port # Default: 5432

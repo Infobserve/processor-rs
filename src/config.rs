@@ -1,11 +1,13 @@
-use log::{info, warn};
+use log::{info, warn, error};
 use std::fs;
 use std::env;
 
+extern crate num_cpus;
 use anyhow::Result;
 use yaml_rust::{YamlLoader, Yaml};
 
-use crate::errors;
+use crate::errors::ConfigurationError;
+use crate::utils::clamp_min;
 
 const DEFAULT_NUM_PROCESSORS: i32 = 1;
 const DEFAULT_NUM_FEEDERS: i32 = 1;
@@ -17,6 +19,10 @@ const DEFAULT_DB_PASSWD: &str = "infobserve";
 const DEFAULT_DB_DATABASE: &str = "postgres";
 const DEFAULT_DB_HOST: &str = "localhost";
 const DEFAULT_DB_PORT: u16 = 5432;
+
+const FEED_WORKER_PERC: f32 = 0.25;
+const PROC_WORKER_PERC: f32 = 0.5;
+const LOAD_WORKER_PERC: f32 = 0.25;
 
 #[derive(PartialEq, Debug)]
 pub struct Config {
@@ -122,19 +128,37 @@ impl WorkerCfg {
     }
 
     fn from_block(block: &Yaml) -> Result<Self> {
-        let num_processors = Self::int_or_default(&block["processors"], DEFAULT_NUM_PROCESSORS);
-        let num_feeders = Self::int_or_default(&block["feeders"], DEFAULT_NUM_FEEDERS);
-        let num_loaders = Self::int_or_default(&block["loaders"], DEFAULT_NUM_LOADERS);
+        match block.as_str() {
+            Some(b) => {
+                if b == "auto" {
+                    info!("Auto calculating number of worker threads");
+                    Ok(Self::with_calculated_threads(num_cpus::get()))
+                } else {
+                    error!("Unknown value for `workers` key: {}", b);
+                    Err(ConfigurationError::BadWorkersKeyValue(b.to_string()).into())
+                }
+            },
+            None => {
+                let num_processors = Self::int_or_default(&block["processors"], DEFAULT_NUM_PROCESSORS);
+                let num_feeders = Self::int_or_default(&block["feeders"], DEFAULT_NUM_FEEDERS);
+                let num_loaders = Self::int_or_default(&block["loaders"], DEFAULT_NUM_LOADERS);
 
-        if num_processors <= 0 || num_feeders <= 0 || num_loaders <= 0 {
-            return Err(errors::NonPositiveWorkersError.into());
+                if num_processors <= 0 || num_feeders <= 0 || num_loaders <= 0 {
+                    return Err(ConfigurationError::NegativeWorkersError.into());
+                }
+
+                Ok(Self { num_processors, num_feeders, num_loaders })
+            }
         }
+    }
 
-        Ok(Self {
-            num_processors,
-            num_feeders,
-            num_loaders
-        })
+    fn with_calculated_threads(overall_cpus: usize) -> Self {
+        let num_processors = clamp_min((overall_cpus as f32 * PROC_WORKER_PERC).floor() as i32, 1);
+        let num_feeders = clamp_min((overall_cpus as f32 * FEED_WORKER_PERC).floor() as i32, 1);
+        let num_loaders = clamp_min((overall_cpus as f32 * LOAD_WORKER_PERC).floor() as i32, 1);
+
+        info!("Will use {} processor, {} feeder and {} loader threads", num_processors, num_feeders, num_loaders);
+        Self { num_processors, num_feeders, num_loaders }
     }
 
     fn int_or_default(block: &Yaml, default: i32) -> i32 {
@@ -316,12 +340,43 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn blows_up_for_non_positive_workers() {
-        let  yml = r#"
-        workers:
-            feeders: -1
+    fn auto_calculates_negative_workers() {
+        let expected = WorkerCfg { num_processors: 4, num_feeders: 2, num_loaders: 2 };
+        let actual = WorkerCfg::with_calculated_threads(8);
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn auto_calculates_workers() {
+        let yml = r#"
+        workers: auto
         "#;
+
+        let cfg = Config::from_string(yml).unwrap();
+        let workers = cfg.workers();
+
+        assert_ne!(workers.num_processors(), DEFAULT_NUM_PROCESSORS);
+        assert_ne!(workers.num_feeders(), DEFAULT_NUM_FEEDERS);
+        assert_ne!(workers.num_loaders(), DEFAULT_NUM_LOADERS);
+    }
+
+    #[test]
+    fn auto_calculate_assigns_at_least_one_thread() {
+        let actual = WorkerCfg::with_calculated_threads(1);
+
+        assert_ne!(actual.num_processors(), 0);
+        assert_ne!(actual.num_feeders(), 0);
+        assert_ne!(actual.num_loaders(), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn only_accepts_auto_value_for_workers() {
+        let yml = r#"
+        workers: something_else
+        "#;
+
         Config::from_string(yml).unwrap();
     }
 }

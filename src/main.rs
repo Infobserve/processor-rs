@@ -25,7 +25,6 @@ fn main() {
             error!("Could not load configuration file: {}", e);
             process::exit(1);
         }
-
     };
 
     let connection = match DbConnection::connect(

@@ -62,6 +62,6 @@ impl DbConnection {
     }
 
     pub fn get(&self) -> Result<Client> {
-        self.pool.get().map_err(|e| anyhow::Error::new(e) )
+        self.pool.get().map_err(anyhow::Error::new)
     }
 }

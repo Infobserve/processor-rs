@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{fs, str, error, thread, sync};
+use std::{fs, str, error, thread, sync::Arc};
 use log::{info, warn, error};
 
 use yara::{Compiler, Rules, Rule, YaraError};
@@ -62,7 +62,7 @@ pub fn start_processors(
         panic!("Refusing to continue with 0 processors -- Process would hang");
     }
 
-    let yara_dir_arc = sync::Arc::new(yara_dir.to_owned());
+    let yara_dir_arc = Arc::new(yara_dir.to_owned());
     let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(num_processors as usize);
 
     info!("Spawning {}", utils::pluralize(num_processors, "processor"));
@@ -80,14 +80,15 @@ pub fn start_processors(
 /// to the DB (see database::loader::DbLoader)
 /// 
 /// Returns the join handle for the newly spawned thread
+#[allow(clippy::rc_buffer)]
 fn process_forever(
     feed_recvr: &Receiver<Event>,
     load_sendr: &Sender<ProcessedEvent>,
-    yara_dir_arc: &sync::Arc<String>
+    yara_dir_arc: &Arc<String>
 ) -> thread::JoinHandle<()> {
     let rx = Receiver::clone(feed_recvr);
     let sx = Sender::clone(load_sendr);
-    let yara_dir = sync::Arc::clone(&yara_dir_arc);
+    let yara_dir = Arc::clone(&yara_dir_arc);
 
     thread::spawn(move || {
         let p = match Processor::from_dir(&yara_dir) {

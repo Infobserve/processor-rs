@@ -130,6 +130,7 @@ impl Event {
         &self.discovered_at
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create(
         id: Option<i32>,
         url: &str,
@@ -149,7 +150,7 @@ impl Event {
         Self {
             id,
             url: url.to_owned(),
-            size: size,
+            size,
             source: source.to_owned(),
             raw_content: raw_content.to_owned(),
             filename: filename.to_owned(),

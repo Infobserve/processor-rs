@@ -7,6 +7,7 @@ mod processing;
 mod database;
 mod entities;
 mod logger;
+mod feeder;
 
 use std::process;
 
@@ -26,6 +27,8 @@ fn main() {
             process::exit(1);
         }
     };
+
+    let f_handles = feeder::start_feeders(cfg.redis().host(), cfg.redis().port(), cfg.workers().num_feeders());
 
     let connection = match DbConnection::connect(
         cfg.db().user(),
@@ -58,6 +61,11 @@ fn main() {
     );
 
     let l_handles = database::start_loaders(&load_recvr, db_loader, cfg.workers().num_loaders());
+
+    for handle in f_handles {
+        handle.join().unwrap();
+        println!("Joined feeder");
+    }
 
     // Dropping the sender will gracefully close the receiver's end as well
     // and as such make all processor threads return

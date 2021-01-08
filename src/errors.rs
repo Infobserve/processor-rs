@@ -1,20 +1,11 @@
-use std::error::Error;
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
-pub struct NonPositiveWorkersError;
-impl fmt::Display for NonPositiveWorkersError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Number of workers must be positive")
-    }
+#[derive(Error, Debug)]
+pub enum ConfigurationError {
+    #[error("Unrecognized value for `workers` key: {0}")]
+    BadWorkersKeyValue(String),
+    #[error("No yara rules could be loaded")]
+    NoYaraRulesError,
+    #[error("Number of workers cannot be negative")]
+    NegativeWorkersError
 }
-impl Error for NonPositiveWorkersError {}
-
-#[derive(Debug, Clone)]
-pub struct NoYaraRulesError;
-impl fmt::Display for NoYaraRulesError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "No yara rules could be loaded")
-    }
-}
-impl Error for NoYaraRulesError {}

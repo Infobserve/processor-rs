@@ -1,5 +1,8 @@
 ---
-workers:
+workers: # Specifies the number of threads each type of worker will use. If the value of `workers` is `auto`,
+         # then all of the system's available threads (logical) will be used, distributed to the different worker types.
+         # Alternatively, each type's thread number can be specified. If `workers`' value is not `auto` and a worker type
+         # is not specified, then it will default to `1`
   processors: num_processors # The number of threads the processor will use
   feeders: num_feeders # The number of feeder threads that will provide data to the processors
   loaders: num_loaders # The number of DB loader threads that will consume processed data and store them in the DB

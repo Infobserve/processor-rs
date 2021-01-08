@@ -1,4 +1,7 @@
 //! Contains varius utility/helper functions
+
+use std::cmp;
+
 use walkdir::WalkDir;
 use inflector::string::pluralize::to_plural;
 
@@ -70,6 +73,24 @@ pub fn pluralize<T: Into<i64>>(num: T, word: &str) -> String {
     format!("{} {}", x, w)
 }
 
+/// Clamps the given value over the given minimum value
+/// Returns the given value if it is over `min`, otherwise returns `min`
+/// 
+/// # Example
+/// ```
+/// use utils::clamp_min;
+/// 
+/// assert_eq!(2, clamp_min(2, 0));
+/// assert_eq!(0, clamp_min(-2, 0));
+/// ```
+pub fn clamp_min<T: cmp::Ord>(val: T, min: T) -> T {
+    if val < min {
+        min
+    } else {
+        val
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +123,15 @@ mod tests {
     fn it_pluralizes_on_0() {
         let actual = pluralize(0, "word");
         assert_eq!(actual, "0 words");
+    }
+
+    #[test]
+    fn clamps_when_below_min() {
+        assert_eq!(2, clamp_min(2, 0));
+    }
+
+    #[test]
+    fn does_not_clamp_when_below_min() {
+        assert_eq!(0, clamp_min(-2, 0));
     }
 }

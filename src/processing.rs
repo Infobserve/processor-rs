@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 
-use std::{fs, str, error, thread, sync::Arc};
+use std::{fs, str, thread, sync::Arc};
 use log::{info, warn, error};
 
 use yara::{Compiler, Rules, Rule, YaraError};
 use crossbeam_channel::{Sender, Receiver};
+use anyhow::Result;
 
-use crate::utils;
-use crate::errors;
+use crate::utils::{pluralize, rec_get_files_by_ext};
+use crate::errors::ConfigurationError;
 use crate::entities::{Event, FlatMatch, ProcessedEvent};
 
 /// Spawns `num_processors` threads each of which continuously pops from the read-end of a crossbeam channel,
@@ -65,7 +66,7 @@ pub fn start_processors(
     let yara_dir_arc = Arc::new(yara_dir.to_owned());
     let mut p_handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(num_processors as usize);
 
-    info!("Spawning {}", utils::pluralize(num_processors, "processor"));
+    info!("Spawning {}", pluralize(num_processors, "processor"));
     for _ in 0..num_processors {
         p_handles.push(process_forever(feed_recvr, load_sendr, &yara_dir_arc));
     }
@@ -137,12 +138,12 @@ impl Processor {
     /// # Errors
     ///
     /// `crate::errors::NoYaraRulesError` - When no `.yar` files can be found under `rule_root`
-    fn from_dir(rule_root: &str) -> Result<Processor, Box<dyn error::Error>> {
-        let rule_files = utils::rec_get_files_by_ext(rule_root, "yar");
+    fn from_dir(rule_root: &str) -> Result<Processor> {
+        let rule_files = rec_get_files_by_ext(rule_root, "yar");
 
         if rule_files.is_empty() {
             error!("Found no .yar files under {}. Refusing to continue", rule_root);
-            return Err(Box::new(errors::NoYaraRulesError));
+            return Err(ConfigurationError::NoYaraRulesError.into());
         }
 
         Processor::with_rule_files(rule_files)
@@ -152,7 +153,7 @@ impl Processor {
     /// the contents of the provided files
     /// Largely works the same as `Processor::from_dir`, but each file must
     /// be passed explicitly
-    fn with_rule_files(filenames: Vec<String>) -> Result<Processor, Box<dyn error::Error>> {
+    fn with_rule_files(filenames: Vec<String>) -> Result<Processor> {
         let mut rules: Vec<String> = Vec::new();
         for filename in filenames.into_iter() {
             rules.push(fs::read_to_string(filename)?);
@@ -167,7 +168,7 @@ impl Processor {
     ///
     /// * `rule` - The Yara rule
     #[allow(dead_code)]
-    fn with_rule_str(rule: &str) -> Result<Processor, Box<dyn error::Error>> {
+    fn with_rule_str(rule: &str) -> Result<Processor> {
         Processor::with_rules(vec![rule.to_string()])
     }
 
@@ -177,7 +178,7 @@ impl Processor {
     /// # Arguments
     ///
     /// * `rules` - A vector of Yara rule strings
-    fn with_rules(rules: Vec<String>) -> Result<Processor, Box<dyn error::Error>> {
+    fn with_rules(rules: Vec<String>) -> Result<Processor> {
         let mut compiler = Compiler::new()?;
 
         for rule in rules.into_iter() {

@@ -1,8 +1,8 @@
-use log::{info, warn, error};
+use log::{info, error};
 use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::Sender;
-use redis::Client;
+use redis::{Connection, Client};
 use anyhow::Result;
 
 use crate::entities::Event;
@@ -15,7 +15,10 @@ pub fn start_feeders(sendr: &Sender<Event>, host: &str, port: u16, num_feeders: 
         let sendr_copy = Sender::clone(sendr);
         threads.push(
             thread::spawn(move || {
-                feeder.listen(&sendr_copy).unwrap();
+                if let Err(e) = feeder.listen(&sendr_copy) {
+                    error!("Feeder hit an error!: {}", e);
+                    return;
+                }
             })
         );
     }
@@ -35,41 +38,49 @@ impl Feeder {
     }
 
     fn listen(&mut self, sendr: &Sender<Event>) -> Result<()> {
-        let mut con = self.client.get_connection()?;
-        let mut sub_handle = con.as_pubsub();
-
-        for channel in vec!["events", "cmd"] {
-            sub_handle.subscribe(channel)?;
-        }
+        let mut conn = self.client.get_connection()?;
 
         loop {
-            let msg = sub_handle.get_message()?;
-            let payload = msg.get_payload::<String>()?;
+            let msg = match self.pop_msg(&mut conn) {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Could not pop event from redis queue: {}", e);
+                    continue;
+                }
+            };
 
-            match msg.get_channel_name() {
-                "cmd" => {
-                    if payload == String::from("quit") {
-                        break;
-                    } else {
-                        warn!("Unknown message received at cmd channel: {}", payload);
+            let payload = msg.payload;
+
+            if &payload == "QUIT" {
+                break;
+            }
+
+            info!("Got new event");
+
+            match Event::from_json_str(&payload) {
+                Ok(e) => {
+                    if let Err(e) = sendr.send(e) {
+                        error!("Could not send event to processor: {}", e);
                     }
                 },
-                "events" => {
-                    info!("Got new event!");
-                    match Event::from_json_str(&payload) {
-                        Ok(e) => {
-                            if let Err(e) = sendr.send(e) {
-                                error!("Could not send event to processor: {}", e);
-                            }
-                        },
-                        Err(e) => error!("Could not deserialize message from redis: msg: {}, error: {}", payload, e)
-
-                    }
-                },
-                x => error!("Message received in unknown channel ({}): {}", x, payload)
+                Err(e) => error!("Could not deserialize message from redis: msg: {}, error: {}", payload, e)
             }
         }
 
         Ok(())
     }
+
+    fn pop_msg(&self, conn: &mut Connection) -> Result<Message> {
+        let msg: Vec<String> = redis::cmd("BLPOP").arg("events").arg(0).cursor_arg(0).clone().iter(conn)?.collect();
+
+        Ok(Message {
+            name: msg[0].clone(),
+            payload: msg[1].clone()
+        })
+    }
+}
+
+struct Message {
+    name: String,
+    payload: String
 }

@@ -9,3 +9,9 @@ pub enum ConfigurationError {
     #[error("Number of workers cannot be negative")]
     NegativeWorkersError
 }
+
+#[derive(Error, Debug)]
+pub enum ProcessingError {
+    #[error("Empty '{0}' value when deserializing event")]
+    NoValueError(String)
+}

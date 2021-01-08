@@ -1,30 +1,26 @@
 use log::{info, warn, error};
-use std::{sync::Arc, thread};
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 
-use redis::{Client, Connection, PubSub};
+use crossbeam_channel::Sender;
+use redis::Client;
 use anyhow::Result;
 
-use crate::errors::NotSubscribedError;
+use crate::entities::Event;
 
-pub fn start_feeders(host: &str, port: u16, num_feeders: i32) -> Vec<JoinHandle<()>> {
+pub fn start_feeders(sendr: &Sender<Event>, host: &str, port: u16, num_feeders: i32) -> Vec<JoinHandle<()>> {
     let mut threads = Vec::with_capacity(num_feeders as usize);
-    let host_arc = Arc::new(host.to_owned());
 
     for _ in 0..num_feeders {
-        threads.push(listen(&host_arc, port));
+        let mut feeder = Feeder::connect(&host, port).unwrap();
+        let sendr_copy = Sender::clone(sendr);
+        threads.push(
+            thread::spawn(move || {
+                feeder.listen(&sendr_copy).unwrap();
+            })
+        );
     }
 
     threads
-}
-
-fn listen(host_arc: &Arc<String>, port: u16) -> JoinHandle<()> {
-    let host = Arc::clone(&host_arc);
-
-    thread::spawn(move || {
-        let mut feeder = Feeder::connect(&host, port).unwrap();
-        feeder.listen().unwrap();
-    })
 }
 
 struct Feeder {
@@ -38,7 +34,7 @@ impl Feeder {
         Ok(Self { client })
     }
 
-    fn listen(&mut self) -> Result<()> {
+    fn listen(&mut self, sendr: &Sender<Event>) -> Result<()> {
         let mut con = self.client.get_connection()?;
         let mut sub_handle = con.as_pubsub();
 
@@ -55,11 +51,20 @@ impl Feeder {
                     if payload == String::from("quit") {
                         break;
                     } else {
-                        warn!("Unknown message @ cmd channel: {}", payload);
+                        warn!("Unknown message received at cmd channel: {}", payload);
                     }
                 },
                 "events" => {
                     info!("Got new event!");
+                    match Event::from_json_str(&payload) {
+                        Ok(e) => {
+                            if let Err(e) = sendr.send(e) {
+                                error!("Could not send event to processor: {}", e);
+                            }
+                        },
+                        Err(e) => error!("Could not deserialize message from redis: msg: {}, error: {}", payload, e)
+
+                    }
                 },
                 x => error!("Message received in unknown channel ({}): {}", x, payload)
             }

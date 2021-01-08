@@ -1,0 +1,42 @@
+[
+  {
+    "url": "https://gist.github.com/bad-creator/bad-paste",
+    "size": 12,
+    "source": "gist",
+    "raw_content": "my password: 1234",
+    "filename": "dashlane-backup",
+    "creator": "bad-creator",
+    "created_at": "2020/12/31-00:00:00",
+    "discovered_at": "2021/01/01-00:00:01"
+  },
+  {
+    "url": "https://pastebin.com/worse-paste",
+    "size": 200,
+    "source": "pastebin",
+    "raw_content": "my boss's password: 4321",
+    "filename": "promotion.txt",
+    "creator": "fired-employee-99",
+    "created_at": "2019/05/12-13:45:12",
+    "discovered_at": "2019/06/14-09:44:41"
+  },
+  {
+    "url": "https://github.com/infobserve/infobserve",
+    "size": 2000,
+    "source": "github",
+    "raw_content": "mikts' password: t$eEk7Y$eeY9",
+    "filename": "main.py",
+    "creator": "kostaskol",
+    "created_at": "2019/11/30-17:12:14",
+    "discovered_at": "2019/12/01-16:11:13"
+  },
+  {
+    "url": "https://pastebin.com/careful-user",
+    "size": 2500,
+    "source": "pastebin",
+    "raw_content": "Hello friendos",
+    "filename": "safe.txt",
+    "creator": "careful-user",
+    "created_at": "2020/05/01-01:01:01",
+    "discovered_at": "2020/05/01-01:02:01"
+  }
+]

@@ -1,9 +1,14 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, TimeZone};
 use r2d2_postgres::postgres::{Row, Transaction};
+use serde_json::Value;
+
 use crate::database::Insert;
+use crate::errors::ProcessingError;
+
+const DATETIME_FMT: &str = "%Y/%m/%d-%H:%M:%S";
 
 #[derive(Debug)]
 pub struct Event {
@@ -68,6 +73,60 @@ impl Insert for Event {
 }
 
 impl Event {
+    pub fn from_json_str(json_str: &str) -> Result<Self> {
+        let json: Value = serde_json::from_str(json_str)?;
+
+    // raw_content: String,
+    // filename: String,
+    // creator: String,
+    // created_at: DateTime<Local>,
+    // discovered_at: DateTime<Local>
+        let url = match json["url"].as_str() {
+            Some(u) => u,
+            None => return Err(ProcessingError::NoValueError("url".to_string()).into())
+        };
+        let size = match json["size"].as_i64() {
+            Some(s) => s,
+            None => return Err(ProcessingError::NoValueError("size".to_string()).into())
+        };
+        let source = match json["source"].as_str() {
+            Some(s) => s,
+            None => return Err(ProcessingError::NoValueError("source".to_string()).into())
+        };
+        let raw_content = match json["raw_content"].as_str() {
+            Some(r) => r,
+            None => return Err(ProcessingError::NoValueError("raw_content".to_string()).into())
+        };
+        let filename = match json["filename"].as_str() {
+            Some(f) => f,
+            None => return Err(ProcessingError::NoValueError("filename".to_string()).into())
+        };
+        let creator = match json["creator"].as_str() {
+            Some(c) => c,
+            None => return Err(ProcessingError::NoValueError("creator".to_string()).into())
+        };
+        let created_at: DateTime<Local> = match json["created_at"].as_str() {
+            Some(c) => {
+                match Local.datetime_from_str( c, DATETIME_FMT) {
+                    Ok(d) => d,
+                    Err(e) => return Err(e.into())
+                }
+            },
+            None => return Err(ProcessingError::NoValueError("created_at".to_string()).into())
+        };
+        let discovered_at: DateTime<Local> = match json["discovered_at"].as_str() {
+            Some(d) => {
+                match Local.datetime_from_str(d, DATETIME_FMT) {
+                    Ok(d) => d,
+                    Err(e) => return Err(e.into())
+                }
+            },
+            None => return Err(ProcessingError::NoValueError("discovered_at".to_string()).into())
+        };
+
+        Ok(Self::new(url, size, source, raw_content, filename, creator, created_at, discovered_at))
+    }
+
     pub fn new(
         url: &str,
         size: i64,
@@ -75,9 +134,10 @@ impl Event {
         raw_content: &str,
         filename: &str,
         creator: &str,
+        created_at: DateTime<Local>,
         discovered_at: DateTime<Local>
     ) -> Self {
-        Self::create(None, url, size, source, raw_content, filename, creator, None, discovered_at)
+        Self::create( None, url, size, source, raw_content, filename, creator, created_at, discovered_at)
     }
 
     pub fn from_row(row: Row) -> Self {
@@ -89,7 +149,7 @@ impl Event {
             row.get("raw_content"),
             row.get("filename"),
             row.get("creator"),
-            Some(row.get("created_at")),
+            row.get("created_at"),
             row.get("discovered_at")
         )
     }
@@ -139,14 +199,9 @@ impl Event {
         raw_content: &str,
         filename: &str,
         creator: &str,
-        created_at: Option<DateTime<Local>>,
+        created_at: DateTime<Local>,
         discovered_at: DateTime<Local>
     ) -> Self {
-        let created_at = match created_at {
-            Some(ca) => ca,
-            None => Local::now()
-        };
-
         Self {
             id,
             url: url.to_owned(),

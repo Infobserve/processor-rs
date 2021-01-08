@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{fs, str, thread, sync::Arc, time, fmt};
-use log::{info, warn, error};
+use log::{info, error};
 
 use yara::{Compiler, Rules, Rule, YaraError};
 use crossbeam_channel::{Sender, Receiver};
@@ -103,8 +103,6 @@ fn process_forever(
                             error!("Failed to send processed event: {}", e);
                             stats.inc_failures();
                         }
-                    } else {
-                        warn!("Zero length match? {:?}", message);
                     }
                 }
                 Err(e) => println!("Whoops: {:?}", e)

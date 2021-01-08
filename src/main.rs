@@ -28,7 +28,6 @@ fn main() {
         }
     };
 
-    let f_handles = feeder::start_feeders(cfg.redis().host(), cfg.redis().port(), cfg.workers().num_feeders());
 
     let connection = match DbConnection::connect(
         cfg.db().user(),
@@ -52,6 +51,13 @@ fn main() {
 
     let (feed_sendr, feed_recvr) = crossbeam_channel::unbounded();
     let (load_sendr, load_recvr) = crossbeam_channel::unbounded();
+
+    let f_handles = feeder::start_feeders(
+        &feed_sendr,
+        cfg.redis().host(),
+        cfg.redis().port(),
+        cfg.workers().num_feeders()
+    );
 
     let p_handles = processing::start_processors(
         &feed_recvr,

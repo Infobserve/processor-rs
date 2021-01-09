@@ -16,7 +16,7 @@ const DEFAULT_YARA_RULE_DIR: &str = "yara-rules/";
 
 const DEFAULT_DB_USER: &str = "postgres";
 const DEFAULT_DB_PASSWD: &str = "infobserve";
-const DEFAULT_DB_DATABASE: &str = "postgres";
+const DEFAULT_DB_DATABASE: &str = "infobserve";
 const DEFAULT_DB_HOST: &str = "localhost";
 const DEFAULT_DB_PORT: u16 = 5432;
 

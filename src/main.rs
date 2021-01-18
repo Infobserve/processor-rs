@@ -16,14 +16,14 @@ use config::Config;
 use database::{DbLoader, DbConnection};
 
 fn main() {
-    let cli: Cli = Cli::new();
+    let cli: Cli = Cli::parse_args();
 
     if let Err(e) = logger::init() {
         error!("Could not initialize logger: {}", e);
         process::exit(1);
     }
 
-    let cfg = match Config::from_file(&cli.config_path) {
+    let cfg = match Config::from_file(&cli.config_path()) {
         Ok(c) => c,
         Err(e) => {
             error!("Could not load configuration file: {}", e);

@@ -3,11 +3,17 @@ extern crate clap;
 use clap::{crate_authors, App, Arg};
 
 pub struct Cli {
-    pub config_path: String,
+    config_path: String,
 }
 
 impl Cli {
-    pub fn new() -> Cli {
+    pub fn config_path(&self) -> &str {
+        &self.config_path
+    }
+}
+
+impl Cli {
+    pub fn parse_args() -> Cli {
         let a = App::new("Infobserve Processor")
             .version("1.0")
             .author(crate_authors!())
@@ -23,9 +29,11 @@ impl Cli {
             .get_matches();
 
         Cli {
+            // We unwrap because it is handled by the clap package.
+            // The case of giving a -c without value uses the default value.
             config_path: a
                 .value_of("config")
-                .expect("configuration path not valid value!")
+                .unwrap()
                 .to_string(),
         }
     }

@@ -5,64 +5,18 @@ Because we're lazy, there's no dockerfile yet
 Here's how to install locally:
 
 ### Install Yara
-For the processor to run, you'll need to have [Yara](https://github.com/VirusTotal/yara) installed
-
-Dependencies
-
-Ubuntu
-
-```
-# apt install automake libtool make gcc
-```
-
-
-
-Archlinux
-
-(you also need to install `autoconf`)
-
-```
-pacman -S automake autoconf libtool make gcc
-```
-
-Now actually install yara:
-```
-~/ $ wget https://github.com/VirusTotal/yara/archive/v3.7.0.tar.gz
-~/ $ tar zxf v3.7.0.tar.gz
-~/ $ cd yara-3.7.0
-~/yara-3.7.0 $ ./bootstrap.sh && ./configure && make && sudo make install
-```
-
-If you also want to make sure that Yara was installed correctly, go ahead and run
-```
-~/yara-3.7.0 $ make check
-```
-
+The processor depends on [Yara](https://github.com/VirusTotal/yara) to be installed locally. No manual installation is required
+as Yara is now included with the crate we use for exporting its bindings ([https://github.com/Hugal31/yara-rust/](yara-rust)).
+If a manual installation is preferred, the [installation steps can be found in Yara's documentation](https://yara.readthedocs.io/en/stable/gettingstarted.html)
 
 ### Cargo
-(Install rustup, cargo etc.)
+(First install rustup, cargo etc.)
 
 ```
 $ git clone https://gitub.com/Infobserve/processor-rs
 $ cd processor-rs
 $ cargo check # Check that everything is OK
 ```
-
-If the last command fails with something like the following: 
-```
-target/debug/processor-rs: error while loading shared libraries: libyara.so.3: cannot open shared object file: No such file or directory
-```
-
-
-
-(which is a problem with Yara linking), you might also need to run:
-```
-# ln -s /usr/local/lib/libyara.so /usr/lib/libyara.so.3
-```
-
-
-
-For the yara crate to compile, the `llvm-config` and `yara` executables must be available (they should be installed from the previous steps)
 
 That's it, you *should* be good to go.
 

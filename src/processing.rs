@@ -15,7 +15,7 @@ use yara::{Compiler, Rules, Rule, YaraError};
 use crossbeam_channel::{Sender, Receiver};
 use anyhow::Result;
 
-use crate::utils::{rec_get_files_by_ext};
+use crate::utils::rec_get_files_by_ext;
 use crate::errors::ConfigurationError;
 use crate::entities::{Event, FlatMatch, ProcessedEvent};
 

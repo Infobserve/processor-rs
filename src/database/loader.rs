@@ -11,7 +11,6 @@ use anyhow::Result;
 
 use crate::entities::{RuleMatch, ProcessedEvent, AsciiMatch};
 use crate::database::{DbConnection, Insert};
-use crate::utils;
 
 /// Given the consuming end of a crossbeam channel, continuously consumes
 /// ProcessedEvent objects and stores them in the db.

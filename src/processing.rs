@@ -135,14 +135,9 @@ impl Processor {
     ///
     /// # Errors
     ///
-    /// `crate::errors::NoYaraRulesError` - When no `.yar` files can be found under `rule_root`
+    /// `errors::ConfigurationError::NoYaraRulesError` - When no `.yar` files can be found under `rule_root`
     fn from_dir(rule_root: &str) -> Result<Processor> {
         let rule_files = rec_get_files_by_ext(rule_root, "yar");
-
-        if rule_files.is_empty() {
-            error!("Found no .yar files under {}. Refusing to continue", rule_root);
-            return Err(ConfigurationError::NoYaraRulesError.into());
-        }
 
         Processor::with_rule_files(rule_files)
     }
@@ -152,6 +147,11 @@ impl Processor {
     /// Largely works the same as `Processor::from_dir`, but each file must
     /// be passed explicitly
     fn with_rule_files(filenames: Vec<String>) -> Result<Processor> {
+        if filenames.is_empty() {
+            error!("No .yar files found");
+            return Err(ConfigurationError::NoYaraRulesError.into());
+        }
+
         let mut compiler = Compiler::new()?;
 
         for filename in filenames.into_iter() {

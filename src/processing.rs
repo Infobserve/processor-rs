@@ -126,7 +126,7 @@ fn process_forever(
                         }
                     }
                 }
-                Err(e) => println!("Whoops: {:?}", e)
+                Err(e) => error!("Error encountered during processing: {}", e)
             }
             stats.add_duration(start.elapsed());
         }

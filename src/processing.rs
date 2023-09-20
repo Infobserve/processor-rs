@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use std::{fs, str, thread, sync::Arc, time, fmt};
-use log::{info, warn, error};
+use std::{str, thread, sync::Arc, time, fmt};
+use log::{info, error};
 
 use yara::{Compiler, Rules, Rule, YaraError};
 use crossbeam_channel::{Sender, Receiver};
@@ -103,8 +103,6 @@ fn process_forever(
                             error!("Failed to send processed event: {}", e);
                             stats.inc_failures();
                         }
-                    } else {
-                        warn!("Zero length match? {:?}", message);
                     }
                 }
                 Err(e) => println!("Whoops: {:?}", e)
@@ -153,12 +151,15 @@ impl Processor {
     /// Largely works the same as `Processor::from_dir`, but each file must
     /// be passed explicitly
     fn with_rule_files(filenames: Vec<String>) -> Result<Processor> {
-        let mut rules: Vec<String> = Vec::new();
+        let mut compiler = Compiler::new().unwrap();
+
         for filename in filenames.into_iter() {
-            rules.push(fs::read_to_string(filename)?);
+            compiler = compiler.add_rules_file(&filename)?;
         }
 
-        Processor::with_rules(rules)
+        let engine = compiler.compile_rules()?;
+
+        Ok(Processor { engine })
     }
 
     /// Constructs a Processor object from a string representing a Yara rule
@@ -181,7 +182,7 @@ impl Processor {
         let mut compiler = Compiler::new()?;
 
         for rule in rules.into_iter() {
-            compiler.add_rules_str(&rule)?;
+            compiler = compiler.add_rules_str(&rule)?;
         }
 
         let engine = compiler.compile_rules()?;

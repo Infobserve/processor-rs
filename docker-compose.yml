@@ -1,0 +1,25 @@
+version: '3'
+
+services:
+  redis:
+    image: redis
+    container_name: redis-server
+    ports:
+      - "6379:6379"
+    networks:
+      - my_network
+
+  postgres:
+    image: postgres
+    container_name: postgres-server
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: infobserve
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - my_network
+
+networks:
+  my_network:

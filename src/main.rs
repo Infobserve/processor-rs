@@ -1,3 +1,54 @@
+//! This binary crate handles the processing part of the [infobserve project](https://github.com/Infobserve/infobserve).
+//! It's split into 3 distinct components:
+//! 1. [Feeder](crate::feeder): Pops messages from redis. Each message (JSON format) represents an event, as fetched by
+//!    the infobserve part (python). After fetching a message, it deserializes it into an [Event](crate::entities::Event) object
+//!    and sends it for processing using the F-P (feeder-processor) crossbeam channel
+//! 2. [Processor](crate::processing): Pops events from the F-P crossbeam channel. Each event's contents
+//!    are processed using the specified Yara rules. If an event matches any of the Yara rules, a
+//!    [ProcessedEvent](crate::entities::ProcessedEvent) (which contains both the initial event as well as the matched
+//!    parts) is pushed into the P-L (processor-loader) crossbeam channel
+//! 3. [DbLoader](crate::database::DbLoader): Pops [ProcessedEvent](crate::entities::ProcessedEvent)s from the P-L
+//!    crossbeam channel, splits them into normalized database entities
+//!    ([Event](crate::entities::Event), [RuleMatch](crate::entities::RuleMatch), [AsciiMatch](crate::entities::AsciiMatch))
+//!    and inserts them into the database.
+//!
+//! # Configuration
+//!
+//! * **workers**: A hash specifying the number of threads each worker type will use.
+//!                Alternatively can be set to `auto` in which case the system's logical threads will be distributed
+//!                automatically among the workers as such: processor workers will be assigned 50% of the available threads,
+//!                and feeder & loader workers will be assigned 25% each. Keep in mind that all these values are `floor`ed so
+//!                not all available threads will be necessarily used
+//!     * **feeders**: Number of feeder threads. Default: `1`
+//!     * **processors**: Number of processor threads. Default: `1`
+//!     * **loaders**: Number of loader threads. Default: `1`
+//! * **yara_rule_dir**: Path to the root direction which contains the Yara rules (`.yar` extension).
+//!                      Default: `./yara-rules/`
+//! * **database**: A hash specifying how to connect to the postgres server
+//!     * **user**: Default: `postgres`
+//!     * **passwd**: This can either be set here or in the `INFOBSERVE_POSTGRES_PASSWD` environment
+//!                   variable, with the former taking precedence. Default: `infobserve`
+//!     * **db_name**: The database name. Default: `infobserve`
+//!     * **host**: Default: `localhost`
+//!     * **port**: Default: `5432`
+//!
+//! ## Example configuration:
+//! ```yaml
+//! workers:
+//!     processors: 5
+//!     feeders: 2
+//! yara_rule_dir: ./yara
+//! database:
+//!     password: 54infobserve32
+//!     db_name: public
+//! ```
+//!
+//! Note: A configuration template can be found in [`config.tpl.yaml`](https://github.com/Infobserve/processor-rs/blob/main/config.tpl.yaml)
+//!
+//! # Execution:
+//! Simply run `cargo run` (or `cargo run --release` if you've got time to kill). The feeder workers will begin
+//! popping from redis' `events` list. They won't pop anything however, until a
+//! [producer](https://github.com/Infobserve/infobserve#working-with-processor-rs) comes into play
 use log::error;
 
 mod cli;

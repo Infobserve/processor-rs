@@ -5,26 +5,35 @@ use chrono::{DateTime, Local};
 use r2d2_postgres::postgres::{Row, Transaction};
 use crate::database::Insert;
 use crate::entities::FlatMatch;
+use serde_json::Value;
 
+use crate::errors::DeserializationError;
+
+const DATETIME_FMT: &str = "%Y/%m/%d-%H:%M:%S";
+
+/// Responsible for the deserialization as well as DB insertion of
+/// events. Contains the following fields:
+/// 
+/// 
+/// id - A unique identifier for this event. Could be of different format based on the source
+/// url - The url from which this file was retrieved
+/// size - The size of the file (in bytes)
+/// source - The source in which the paste was found
+/// raw_content - The entire content of the file as retrieved from the source
+/// filename - The name of the file as retrieved from the source
+/// creator - The username of the creator
+/// created_at - Time at which the paste was created
+/// discovered_at - Time at which the paste was scraped
 #[derive(Debug)]
 pub struct Event {
-    /// A unique identifier for this event. Could be of different format based on the source
     id: Option<i32>,
-    /// The url from which this file was retrieved
     url: String,
-    /// The size of the file (in bytes)
-    size: i64,
-    /// The source in which the paste was found
+    size: usize,
     source: String,
-    /// The entire content of the file as retrieved from the source
     raw_content: String,
-    /// The name of the file as retrieved from the source
     filename: String,
-    /// The username of the creator
     creator: String,
-    /// Time at which the paste was created
     created_at: DateTime<Local>,
-    /// Time at which the paste was discovered
     discovered_at: DateTime<Local>
 }
 
@@ -32,6 +41,15 @@ pub struct Event {
 pub struct ProcessedEvent(pub Event, pub Vec<FlatMatch>);
 
 impl Insert for Event {
+    /// Insert the event into the DB
+    /// 
+    /// # Arguments
+    /// 
+    /// * conn - A currently open (uncommitted) DB transaction
+    /// 
+    /// # Returns
+    /// 
+    /// An empty Result
     fn insert(&mut self, conn: &mut Transaction) -> Result<()> {
         let stmt = "
         INSERT INTO events
@@ -57,7 +75,7 @@ impl Insert for Event {
             &[
                 &self.source,
                 &self.url,
-                &self.size,
+                &(self.size as i64),
                 &self.raw_content,
                 &self.filename,
                 &self.creator,
@@ -72,28 +90,53 @@ impl Insert for Event {
 }
 
 impl Event {
+    pub fn from_json_str(json_str: &str) -> Result<Self> {
+        let json: Value = serde_json::from_str(json_str)?;
+
+        let url = Self::get_str(&json, "url")?;
+        let size = Self::get_i64(&json, "size")? as usize;
+        let source = Self::get_str(&json, "source")?;
+        let raw_content = Self::get_str(&json, "raw_content")?;
+        let filename = Self::get_str(&json, "filename")?;
+        let creator = Self::get_str(&json, "creator")?;
+        let created_at: DateTime<Local> = 
+            match Self::get_str(&json, "created_at") {
+                Ok(c) => DateTime::parse_from_str(&c, DATETIME_FMT)?.into(),
+                Err(e) => return Err(e)
+                
+            };
+        let discovered_at: DateTime<Local> =
+            match Self::get_str(&json, "discovered_at") {
+                Ok(c) => DateTime::parse_from_str(&c, DATETIME_FMT)?.into(),
+                Err(e) => return Err(e)
+            };
+
+        Ok(Self::new(&url, size, &source, &raw_content, &filename, &creator, created_at, discovered_at))
+    }
+
     pub fn new(
         url: &str,
-        size: i64,
+        size: usize,
         source: &str,
         raw_content: &str,
         filename: &str,
         creator: &str,
+        created_at: DateTime<Local>,
         discovered_at: DateTime<Local>
     ) -> Self {
-        Self::create(None, url, size, source, raw_content, filename, creator, None, discovered_at)
+        Self::create( None, url, size, source, raw_content, filename, creator, created_at, discovered_at)
     }
 
     pub fn from_row(row: Row) -> Self {
         Self::create(
             Some(row.get("id")),
             row.get("url"),
-            row.get("size"),
+            row.get::<&str, i64>("size") as usize,
             row.get("source"),
             row.get("raw_content"),
             row.get("filename"),
             row.get("creator"),
-            Some(row.get("created_at")),
+            row.get("created_at"),
             row.get("discovered_at")
         )
     }
@@ -106,7 +149,7 @@ impl Event {
         &self.url
     }
 
-    pub fn size(&self) -> i64 {
+    pub fn size(&self) -> usize {
         self.size
     }
 
@@ -138,19 +181,14 @@ impl Event {
     fn create(
         id: Option<i32>,
         url: &str,
-        size: i64,
+        size: usize,
         source: &str,
         raw_content: &str,
         filename: &str,
         creator: &str,
-        created_at: Option<DateTime<Local>>,
+        created_at: DateTime<Local>,
         discovered_at: DateTime<Local>
     ) -> Self {
-        let created_at = match created_at {
-            Some(ca) => ca,
-            None => Local::now()
-        };
-
         Self {
             id,
             url: url.to_owned(),
@@ -162,5 +200,20 @@ impl Event {
             created_at,
             discovered_at
         }
+    }
+
+    fn get_str(json: &Value, field_name: &str) -> Result<String> {
+        match json[field_name].as_str() {
+            Some(u) => Ok(u.to_owned()),
+            None => return Err(DeserializationError::NoValueError(field_name.to_string()).into())
+        }
+    }
+
+    fn get_i64(json: &Value, field_name: &str) -> Result<i64> {
+        match json[field_name].as_i64() {
+            Some(u) => Ok(u.to_owned()),
+            None => return Err(DeserializationError::NoValueError(field_name.to_string()).into())
+        }
+
     }
 }

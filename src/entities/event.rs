@@ -4,6 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use r2d2_postgres::postgres::{Row, Transaction};
 use crate::database::Insert;
+use crate::entities::FlatMatch;
 
 #[derive(Debug)]
 pub struct Event {
@@ -26,6 +27,9 @@ pub struct Event {
     /// Time at which the paste was discovered
     discovered_at: DateTime<Local>
 }
+
+#[derive(Debug)]
+pub struct ProcessedEvent(pub Event, pub Vec<FlatMatch>);
 
 impl Insert for Event {
     fn insert(&mut self, conn: &mut Transaction) -> Result<()> {

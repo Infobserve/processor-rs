@@ -1,3 +1,11 @@
+//! Contains everything that has to do with processing strings from events. The main entrypoint into the module
+//! is [start_processors](crate::processing::start_processors) which spawns the specified number of processor threads -
+//! supplying them all with the provided yara rules - each of which continuously pops
+//! [Event](crate::entities::Event)s from a crossbeam channel, processes them
+//! ([Processor.process](crate::processing::Processor.process)) and converts matching ones into
+//! [ProcessedEvent](crate::entities::ProcessedEvent)s, which are a combination of the original event and the matched
+//! portion(s) of the content ([FlatMatch](crate::entities::FlatMatch)). These processed events are then pushed into
+//! another crossbeam channel, whose read-end is provided to the [DbLoader](crate::database::DbLoader) threads.
 #![allow(dead_code)]
 
 use std::{str, thread, sync::Arc, time, fmt};
@@ -14,22 +22,7 @@ use crate::entities::{Event, FlatMatch, ProcessedEvent};
 /// Spawns `num_processors` threads each of which continuously pops from the read-end of a crossbeam channel,
 /// processes the events, enriches matching ones with additional information (e.g. the matched string) and pushes them
 /// to the write-end of another crossbeam channel -- These are later stored in Postgres by another thread
-/// 
-/// # Arguments
-/// 
-/// * feed_recvr - The read-end of a crossbeam channel. While the write-end is not dropped, all threads hang
-///                until an event is available (only one thread processes each event)
-/// * load_sendr - The write-end of a crossbeam channel. After processing events, it turns them into `ProcessedEvent` objects
-///                (the initial event (`Event`) + information on the match (`FlatMatch`)) and pushes them into the channel
-/// * yara_dir - The fully qualified path to the root of a yara rule directory. This directory will be recursively walked and
-///              all Yara rule files (*.yar) will be loaded to the processor
-/// * num_processors - The number of threads to spawn. Each will hang on `feed_recvr` waiting for new messages (events)
-/// 
-/// # Return
-/// Returns a vector of join handles that can be used to join the threads after the feed crossbeam channel's write-end
-/// has been dropped. Notice that since all processing workers handle errors themselves (if they are salvageable),
-/// the returned join handles carry no information when their respective threads are joined upon
-/// 
+///
 /// # Example
 /// 
 /// ```
@@ -43,17 +36,44 @@ use crate::entities::{Event, FlatMatch, ProcessedEvent};
 /// let handles: Vec<JoinHandle<()>> = start_processors(&feed_recevr, &load_sendr, "path/to/yara/dir", 3);
 ///
 /// assert_eq!(handles.len(), 3);
-/// // Note that it's the responsibility of the thread that created the crossbeam channels to drop them as well
-/// // let e = Event::new(...);
-/// // feed_sendr.send(e);
+/// let e = Event::new(
+///     "https://pastebin.com/bad-paste",
+///     550,
+///     "pastebin",
+///     "password: iloveyou" // The #8 most used password surprisingly!
+///     "bad-paste.yml",
+///     "bad-user",
+///     Local::now()
+/// );
+/// feed_sendr.send(e);
 ///
+/// // It's the responsibility of the thread that created the
+/// // crossbeam channels to drop them as well
 /// drop(feed_sendr);
 /// drop(load_sendr);
 ///
+/// let mut overall_events = 0;
 /// for handle in handles {
-///     handle.join().unwrap();
+///     let stats = handle.join().unwrap().unwrap();
+///     overall_events += stats.num_events();
 /// }
+/// assert_eq!(overall_events, 1);
 /// ```
+/// 
+/// # Arguments
+/// 
+/// * `feed_recvr` - The read-end of a crossbeam channel. While the write-end is not dropped, all threads hang
+///                    until an event is available (only one thread processes each event)
+/// * `load_sendr` - The write-end of a crossbeam channel. After processing events, it turns them into `ProcessedEvent` objects
+///                    (the initial event (`Event`) + information on the match (`FlatMatch`)) and pushes them into the channel
+/// * `yara_dir` - The fully qualified path to the root of a yara rule directory. This directory will be recursively walked and
+///                  all Yara rule files (*.yar) will be loaded to the processor
+/// * `num_processors` - The number of threads to spawn. Each will hang on `feed_recvr` waiting for new messages (events)
+/// 
+/// # Return
+/// A vector of `JoinHandle` that can be used to join the threads after the feed crossbeam channel's write-end
+/// has been dropped. The returned handles carry a [Stats](crate::processing::Stats) instance, containing statistics about
+/// the number of processed events, matches, overall processing time etc.
 pub fn start_processors(
     feed_recvr: &Receiver<Event>,
     load_sendr: &Sender<ProcessedEvent>,
@@ -164,6 +184,7 @@ impl Processor {
     }
 
     /// Constructs a Processor object from a string representing a Yara rule
+    /// Note: Currently used only in the processor unit tests
     ///
     /// # Arguments
     ///
@@ -198,6 +219,7 @@ impl Processor {
     /// * `filestr` - The string against which the Yara matcher will run
     ///
     /// # Examples
+    ///
     /// ```
     /// let p = Processor::with_rule_files("yara-rules/MyPassword.yar");
     /// let matches: Vec<FlatMatch> = p.process("password: HelloWorld").unwrap();
@@ -214,6 +236,9 @@ impl Processor {
 }
 
 pub struct Stats {
+    /// An instance of this class is returned by each Processing thread when they are joined
+    /// It measures the overall & average time spent processing, the number of processed events, the number of matches,
+    /// etc.
     overall_proc_time: time::Duration,
     num_events: u32,
     num_matches: u32,

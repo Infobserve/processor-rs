@@ -33,6 +33,7 @@ use crate::entities::{Event, FlatMatch, ProcessedEvent};
 /// # Example
 /// 
 /// ```
+/// use chrono::prelude::*;
 /// use processing::start_processors;
 /// use entities::Event;
 /// 
@@ -274,11 +275,18 @@ impl fmt::Display for Stats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "  Overall time spent processing: {}\n  Average time per event processing: {}\n  Events processed: {}\n  Events matched: {}",
-            self.overall_proc_time().as_millis(),
-            self.avg_proc_time().as_millis(),
+            r#"
+              Overall time spent processing: {}ns
+              Average time spend processing each event: {}ns
+              Events processed: {}
+              Matches: {}
+              Also encountered {} failures
+            "#,
+            self.overall_proc_time().as_nanos(),
+            self.avg_proc_time().as_nanos(),
             self.num_events(),
-            self.num_matches()
+            self.num_matches(),
+            self.num_failures()
         )
     }
 }

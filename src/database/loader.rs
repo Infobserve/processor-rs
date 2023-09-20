@@ -11,7 +11,6 @@ use anyhow::Result;
 
 use crate::entities::{RuleMatch, ProcessedEvent, AsciiMatch};
 use crate::database::{DbConnection, Insert};
-use crate::utils;
 
 /// Given the consuming end of a crossbeam channel, continuously consumes
 /// ProcessedEvent objects and stores them in the db.
@@ -54,7 +53,7 @@ pub fn start_loaders(
     let mut l_handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(num_loaders as usize);
     let db_loader_arc = sync::Arc::new(db_loader);
 
-    info!("Spawning {}", utils::pluralize(num_loaders, "DB loader"));
+    info!("Spawning {} DB loaders", num_loaders);
     for _ in 0..num_loaders {
         let rx = crossbeam_channel::Receiver::clone(load_recvr);
         let db_loader = sync::Arc::clone(&db_loader_arc);

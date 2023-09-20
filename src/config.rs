@@ -24,11 +24,15 @@ const FEED_WORKER_PERC: f32 = 0.25;
 const PROC_WORKER_PERC: f32 = 0.5;
 const LOAD_WORKER_PERC: f32 = 0.25;
 
+const DEFAULT_REDIS_HOST: &str = "localhost";
+const DEFAULT_REDIS_PORT: u16 = 6379;
+
 #[derive(PartialEq, Debug)]
 pub struct Config {
     yara_rule_dir: String,
     worker_cfg: WorkerCfg,
-    db_cfg: DbCfg
+    db_cfg: DbCfg,
+    redis_cfg: RedisCfg
 }
 
 #[derive(PartialEq, Debug)]
@@ -45,6 +49,12 @@ pub struct WorkerCfg {
     num_processors: i32,
     num_feeders: i32,
     num_loaders: i32
+}
+
+#[derive(PartialEq, Debug)]
+pub struct RedisCfg {
+    host: String,
+    port: u16
 }
 
 impl Config {
@@ -76,6 +86,10 @@ impl Config {
         &self.db_cfg
     }
 
+    pub fn redis(&self) -> &RedisCfg {
+        &self.redis_cfg
+    }
+
     pub fn yara_rule_dir(&self) -> &str {
         &self.yara_rule_dir
     }
@@ -94,11 +108,13 @@ impl Config {
         let rule_dir = doc["yara_rule_dir"].as_str().unwrap_or(DEFAULT_YARA_RULE_DIR);
         let worker_cfg = WorkerCfg::from_block(&doc["workers"])?;
         let db_cfg = DbCfg::from_block(&doc["database"]);
+        let redis_cfg = RedisCfg::from_block(&doc["redis"]);
 
         Ok(Self {
             yara_rule_dir: rule_dir.to_owned(),
             worker_cfg,
-            db_cfg
+            db_cfg,
+            redis_cfg
         })
     }
 }
@@ -108,7 +124,8 @@ impl Default for Config {
         Self {
             yara_rule_dir: DEFAULT_YARA_RULE_DIR.to_owned(),
             db_cfg: Default::default(),
-            worker_cfg: Default::default()
+            worker_cfg: Default::default(),
+            redis_cfg: Default::default()
         }
     }
 }
@@ -247,6 +264,38 @@ impl Default for DbCfg {
     }
 }
 
+impl RedisCfg {
+    fn from_block(yaml_block: &Yaml) -> Self {
+        let host = yaml_block["host"].as_str().unwrap_or(DEFAULT_REDIS_HOST);
+        let port = match yaml_block["port"].as_i64() {
+            Some(p) => p as u16,
+            None => DEFAULT_REDIS_PORT
+        };
+
+        Self {
+            host: host.to_owned(),
+            port
+        }
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl Default for RedisCfg {
+    fn default() -> Self {
+        Self {
+            host: DEFAULT_REDIS_HOST.to_owned(),
+            port: DEFAULT_REDIS_PORT
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -283,7 +332,8 @@ mod tests {
             Config {
                 yara_rule_dir: String::from("foo"),
                 worker_cfg,
-                db_cfg: Default::default()
+                db_cfg: Default::default(),
+                redis_cfg: Default::default()
             }
         );
     }
@@ -305,7 +355,8 @@ mod tests {
             Config {
                 yara_rule_dir: String::from(DEFAULT_YARA_RULE_DIR),
                 worker_cfg,
-                db_cfg: Default::default()
+                db_cfg: Default::default(),
+                redis_cfg: Default::default()
             }
         )
     }
@@ -334,7 +385,8 @@ mod tests {
             Config {
                 yara_rule_dir: String::from(DEFAULT_YARA_RULE_DIR),
                 db_cfg,
-                worker_cfg: Default::default()
+                worker_cfg: Default::default(),
+                redis_cfg: Default::default()
             }
         )
     }

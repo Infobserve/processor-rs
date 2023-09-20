@@ -14,3 +14,6 @@ database:
     db_name: database # The database to connect. Default: infobserve
     host: host # Default: localhost
     port: port # Default: 5432
+redis:
+    host: host # Default: localhost
+    port: port # Default: 6379

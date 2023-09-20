@@ -15,7 +15,7 @@ use yara::{Compiler, Rules, Rule, YaraError};
 use crossbeam_channel::{Sender, Receiver};
 use anyhow::Result;
 
-use crate::utils::{pluralize, rec_get_files_by_ext};
+use crate::utils::{rec_get_files_by_ext};
 use crate::errors::ConfigurationError;
 use crate::entities::{Event, FlatMatch, ProcessedEvent};
 
@@ -83,7 +83,7 @@ pub fn start_processors(
     let yara_dir_arc = Arc::new(yara_dir.to_owned());
     let mut p_handles: Vec<thread::JoinHandle<Result<Stats>>> = Vec::new();
 
-    info!("Spawning {}", pluralize(num_processors as i64, "processor"));
+    info!("Spawning {} processors", num_processors);
     for _ in 0..num_processors {
         p_handles.push(process_forever(feed_recvr, load_sendr, &yara_dir_arc));
     }

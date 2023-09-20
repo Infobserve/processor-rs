@@ -106,7 +106,7 @@ fn process_forever(
 ) -> thread::JoinHandle<Result<Stats>> {
     let rx = Receiver::clone(feed_recvr);
     let sx = Sender::clone(load_sendr);
-    let yara_dir = Arc::clone(&yara_dir_arc);
+    let yara_dir = Arc::clone(yara_dir_arc);
 
     thread::spawn(move || {
         let mut stats = Stats::new();

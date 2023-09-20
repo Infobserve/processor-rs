@@ -64,7 +64,7 @@ pub fn rec_get_files_by_ext(dir: &str, ext: &str) -> Vec<String> {
 /// assert_eq!(pluralize(1, "loaders"), "1 loaders")
 /// ```
 pub fn pluralize<T: Into<i64>>(num: T, word: &str) -> String {
-    let x = num.into() as i64;
+    let x = num.into();
     let w = match x {
         1 => word.to_owned(),
         _ => to_plural(word)

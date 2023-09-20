@@ -89,7 +89,7 @@ impl FlatMatch {
     fn new(rule_name: String, tags: Vec<String>, matches: &[Vec<u8>]) -> FlatMatch {
         let mut data: Vec<String> = Vec::new();
         for single_match in matches.iter() {
-            match str::from_utf8(&single_match) {
+            match str::from_utf8(single_match) {
                 Ok(match_string) => data.push(match_string.to_string()),
                 Err(e) => error!("Could not convert byte array {:?} into string ({}) for Rule {}", single_match, e, rule_name)
             }

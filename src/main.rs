@@ -74,7 +74,7 @@ fn main() {
         process::exit(1);
     }
 
-    let cfg = match Config::from_file(&cli.config_path()) {
+    let cfg = match Config::from_file(cli.config_path()) {
         Ok(c) => c,
         Err(e) => {
             error!("Could not load configuration file: {}", e);

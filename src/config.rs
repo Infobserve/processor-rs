@@ -81,7 +81,7 @@ impl Config {
     }
 
     fn from_string(yml: &str) -> Result<Self> {
-        let docs = YamlLoader::load_from_str(&yml)?;
+        let docs = YamlLoader::load_from_str(yml)?;
 
         // Return the default settings if the file is empty
         if docs.is_empty() {

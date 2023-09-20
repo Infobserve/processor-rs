@@ -5,3 +5,4 @@ logs
 *.swp
 .idea
 patches
+.vscode
